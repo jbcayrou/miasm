@@ -1191,6 +1191,13 @@ def ExprInt64(i):
     return ExprInt(uint64(i))
 
 
+def ExprInt128(i):
+    return ExprInt(uint128(i))
+
+def ExprInt256(i):
+    return ExprInt(uint256(i))
+
+
 def ExprInt_from(e, i):
     "Generate ExprInt with size equal to expression"
     return ExprInt(mod_size2uint[e.size](i))

@@ -1186,7 +1186,7 @@ class cls_mn(object):
     @classmethod
     def fromstring(cls, s, mode = None):
         global total_scans
-        name = re.search('(\S+)', s).groups()
+        name = re.search('(\S+)', s).groups ()
         if not name:
             raise ValueError('cannot find name', s)
         name = name[0]

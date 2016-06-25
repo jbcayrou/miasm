@@ -1470,7 +1470,6 @@ class disasmEngine(object):
             if self.blocs_wd is not None and bloc_cpt > self.blocs_wd:
                 log_asmbloc.debug("blocs watchdog reached at %X", int(offset))
                 break
-
             target_offset = int(todo.pop(0))
             if (target_offset is None or
                     target_offset in self.job_done):

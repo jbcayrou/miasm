@@ -13,7 +13,7 @@ class Machine(object):
 
     __available = ["arml", "armb", "armtl", "armtb", "sh4", "x86_16", "x86_32",
                    "x86_64", "msp430", "mips32b", "mips32l",
-                   "aarch64l", "aarch64b"]
+                   "aarch64l", "aarch64b", "evm"]
 
 
     def __init__(self, machine_name):
@@ -117,6 +117,14 @@ class Machine(object):
             jitter = jit.jitter_mips32l
             from miasm2.arch.mips32.ira import ir_a_mips32l as ira
             from miasm2.arch.mips32.sem import ir_mips32l as ir
+        elif machine_name == "evm":
+            from miasm2.arch.evm import arch, jit
+            from miasm2.arch.evm.disasm import dis_evm as dis_engine
+            from miasm2.arch.evm.sem import ir_evm as ir
+            from miasm2.arch.evm.ira import ir_a_evm as ira
+            jitter = jit.jitter_evm
+
+            mn = arch.mn_evm
         else:
             raise ValueError('Unknown machine: %s' % machine_name)
 
