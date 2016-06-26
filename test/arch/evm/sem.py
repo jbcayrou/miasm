@@ -401,17 +401,34 @@ SLT
         self.assertEqual(res,
                          {
                             M(0): 0, #  ? 0x00 <s 0xffffff...f0 (-15) => no
-                            M(1): 0x0,
+                            M(1): 0,
                             SP: SP_pos(1)
                           }
                         )
-
         asm_text = """
 PUSH1 0xf0
 NOT
 PUSH1 0x01
 ADD
-PUSH1 0xf1
+PUSH1 0x3
+SLT
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0, #  ? 0x00 <s 0xffffff...f0 (-15) => no
+                            M(1): 0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+        asm_text = """
+
+PUSH1 0x02
+NOT
+PUSH1 0x01
+ADD
+PUSH1 0x03
 NOT
 PUSH1 0x01
 ADD
@@ -420,7 +437,64 @@ SLT
         res = compute_text(asm_text, {SP: 0})
         self.assertEqual(res,
                          {
-                            M(0): 1, # -16 < (-15) ?
+                            M(0): 1, # -3 < -2 ?
+                            M(1): 0x0,
+                            M(2): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_sgt(self):
+
+        asm_text = """
+PUSH1 0xf0
+NOT
+PUSH1 0x01
+ADD
+PUSH1 0x0
+SGT
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 1, #  ? 0x00 <s 0xffffff...f0 (-15) => no
+                            M(1): 0,
+                            SP: SP_pos(1)
+                          }
+                        )
+        asm_text = """
+PUSH1 0xf0
+NOT
+PUSH1 0x01
+ADD
+PUSH1 0x3
+SGT
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 1, #  ? 0x00 <s 0xffffff...f0 (-15) => no
+                            M(1): 0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+        asm_text = """
+
+PUSH1 0x02
+NOT
+PUSH1 0x01
+ADD
+PUSH1 0x03
+NOT
+PUSH1 0x01
+ADD
+SGT
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0, # -3 < -2 ?
                             M(1): 0x0,
                             M(2): 0x0,
                             SP: SP_pos(1)
