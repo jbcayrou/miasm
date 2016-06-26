@@ -120,3 +120,4 @@ class ExpressionSimplifier(object):
 # Public ExprSimplificationPass instance with commons passes
 expr_simp = ExpressionSimplifier()
 expr_simp.enable_passes(ExpressionSimplifier.PASS_COMMONS)
+

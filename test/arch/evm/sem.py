@@ -10,6 +10,8 @@ from miasm2.arch.evm.arch import mn_evm as mn
 from miasm2.arch.evm.sem import ir_evm as ir_arch
 from miasm2.arch.evm.regs import *
 from miasm2.expression.expression import *
+from miasm2.expression.simplifications import ExpressionSimplifier
+
 from miasm2.core import parse_asm, asmbloc
 from pdb import pm
 
@@ -17,6 +19,9 @@ from miasm2.expression.simplifications import expr_simp
 
 logging.getLogger('cpuhelper').setLevel(logging.ERROR)
 EXCLUDE_REGS = set([ir_arch().IRDst])
+
+# Add ExprCond resolver 
+expr_simp.enable_passes(ExpressionSimplifier.PASS_COND)
 
 def M(pos):
     return ExprMem(ExprInt256(pos*256), 256)
@@ -68,13 +73,13 @@ def compute_text(asm, inputstate={}, debug=False):
     interm = ir_arch()
 
     for b in all_bloc:
-        print all_bloc
+        #print all_bloc
         interm.add_bloc(b)
 
     symexec = symbexec(interm, sympool)
 
     symbolic_pc = symexec.emul_ir_blocs(interm, 0, step=False)
-    print symbolic_pc
+    #print symbolic_pc
 
     if debug:
         for k, v in symexec.symbols.items():
@@ -200,6 +205,426 @@ ADD
                             M(0): 0x11,
                             M(1): 0x0,
                             SP: SP_pos(1)
+                          }
+                        )
+
+    def test_mul(self):
+
+        asm_text = """
+PUSH1 0x03
+PUSH1 0x04
+MUL
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0x0c, # 3*4 = 12
+                            M(1): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_sub(self):
+
+        asm_text = """
+PUSH1 0x01
+PUSH1 0x08
+SUB
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0x07, # 3*4 = 12
+                            M(1): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_div(self):
+
+        asm_text = """
+PUSH1 0x03
+PUSH1 0x09
+DIV
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0x3, # 9/3 = 3
+                            M(1): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_div_zero(self):
+
+        asm_text = """
+PUSH1 0x00
+PUSH1 0x09
+DIV
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0x0, # 9/3 = 3
+                            M(1): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_mod(self):
+
+        asm_text = """
+PUSH1 0x10
+PUSH1 0x18
+MOD
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0x8, # 0x18 % 0x10 = 0x08
+                            M(1): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_exp(self):
+
+        asm_text = """
+PUSH1 0x8
+PUSH1 0x2
+EXP
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 256, # 2**8 = 256
+                            M(1): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_addmod(self):
+
+        asm_text = """
+PUSH1 0x10
+PUSH1 0x8
+PUSH1 0x10
+ADDMOD
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0x8, # (0x10 + 0x8) % 0x10
+                            M(1): 0x0,
+                            M(2): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+
+    def test_mulmod(self):
+
+        asm_text = """
+PUSH1 0x10
+PUSH1 0x8
+PUSH1 0x10
+MULMOD
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0x0, # (0x10 * 0x8) % 0x10
+                            M(1): 0x0,
+                            M(2): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_lt(self):
+
+        asm_text = """
+PUSH1 0x8
+PUSH1 0x2
+LT
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 1, # 2**8 = 256
+                            M(1): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+        asm_text = """
+PUSH1 0x8
+PUSH1 0x2
+LT
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 1, # 2**8 = 256
+                            M(1): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_gt(self):
+
+        asm_text = """
+PUSH1 0x8
+PUSH1 0x2
+GT
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0, # 2**8 = 256
+                            M(1): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_slt(self):
+
+        asm_text = """
+PUSH1 0xf0
+NOT
+PUSH1 0x01
+ADD
+PUSH1 0x0
+SLT
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0, #  ? 0x00 <s 0xffffff...f0 (-15) => no
+                            M(1): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+        asm_text = """
+PUSH1 0xf0
+NOT
+PUSH1 0x01
+ADD
+PUSH1 0xf1
+NOT
+PUSH1 0x01
+ADD
+SLT
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 1, # -16 < (-15) ?
+                            M(1): 0x0,
+                            M(2): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_eq(self):
+
+        asm_text = """
+PUSH1 0x1234
+PUSH1 0x1234
+EQ
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 1,
+                            M(1): 0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+        asm_text = """
+PUSH1 0x1234
+PUSH1 0x4444
+EQ
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0,
+                            M(1): 0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+
+    def test_iszero(self):
+
+        asm_text = """
+PUSH1 0x00
+ISZERO
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 1,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+        asm_text = """
+PUSH1 0x01
+ISZERO
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_and(self):
+
+        asm_text = """
+PUSH1 0xF3
+PUSH1 0x0F
+AND
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0x03,
+                            M(1): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_or(self):
+
+        asm_text = """
+PUSH1 0xF3
+PUSH1 0x0F
+OR
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0xff,
+                            M(1): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_xor(self):
+
+        asm_text = """
+PUSH1 0xF0
+PUSH1 0xFF
+XOR
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0x0F,
+                            M(1): 0x0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_not(self):
+
+        asm_text = """
+PUSH1 0x%x
+NOT
+"""% (2**256-1)
+        res = compute_text(asm_text, {SP: 0})
+        print res
+        self.assertEqual(res,
+                         {
+                            M(0): 0,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_byte(self):
+
+        asm_text = """
+PUSH1 0x1234
+PUSH1 0x1
+BYTE
+"""
+        res = compute_text(asm_text, {SP: 0})
+        print res
+        self.assertEqual(res,
+                         {
+                            M(0): 0x12, # TODO : check Little or big endian ??
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_jump(self):
+
+        asm_text = """
+PUSH1 0x5
+JUMP
+PUSH1 0x42
+JUMPDEST
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0x00,
+                            SP: SP_pos(0)
+                          }
+                        )
+
+    def test_jumpi(self):
+        return
+
+        asm_text = """
+PUSH1 0x07
+PUSH1 0x0
+JUMPI
+PUSH1 0xff
+JUMPDEST
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(1): 0x00,
+                            M(0): 0x00,
+                            SP: SP_pos(0)
+                          }
+                        )
+
+
+        asm_text = """
+PUSH1 0x07
+PUSH1 0x1
+JUMPI
+PUSH1 0x42
+JUMPDEST
+"""
+        res = compute_text(asm_text, {SP: 0})
+        print res
+        self.assertEqual(res,
+                         {
+                            M(0): 0x42,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_pop(self):
+        asm_text = """
+PUSH1 0x07
+POP
+"""
+        res = compute_text(asm_text, {SP: 0})
+        self.assertEqual(res,
+                         {
+                            M(0): 0x00,
+                            SP: SP_pos(0)
                           }
                         )
 

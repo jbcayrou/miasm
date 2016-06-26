@@ -352,6 +352,7 @@ to_test = [
 ]
 
 expr_simp_cond = ExpressionSimplifier()
+expr_simp.enable_passes(ExpressionSimplifier.PASS_COMMONS)
 expr_simp.enable_passes(ExpressionSimplifier.PASS_COND)
 
 

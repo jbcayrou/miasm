@@ -2,21 +2,37 @@
 #-*- coding:utf-8 -*-
 
 """
-Implementation of sementic instructions.
+Implementation of semantic instructions.
 """
 
 from miasm2.expression.expression import *
+from miasm2.expression.simplifications import expr_simp
+from miasm2.expression.simplifications_cond import ExprOp_inf_signed, ExprOp_inf_unsigned, ExprOp_equal
 from miasm2.arch.evm.regs import *
 from miasm2.arch.evm.arch import mn_evm
 from miasm2.ir.ir import ir
 
 SIZE_WORD = 256
 
+def _stack_item(pos):
+    """
+    SP point to the next element to store.
+    The last item pushed is SP - 1
+    """ 
+    return ExprMem(SP - ExprInt256( (pos +1) * SIZE_WORD), SIZE_WORD)
+
+def _stack_push(item, e):
+    e.append(ExprAff(ExprMem(SP, SIZE_WORD), item))
+    e.append(ExprAff(SP, SP + ExprInt256(1*SIZE_WORD)))
+
+def _stack_pop(e):
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
+    e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
+
 def op_push(ir, instr, a):
     e = []
 
-    e.append(ExprAff(ExprMem(SP , SIZE_WORD), a.zeroExtend(SIZE_WORD)))
-    e.append(ExprAff(SP, SP + ExprInt256(1*SIZE_WORD)))
+    _stack_push(a,e)
 
     return e, []
 
@@ -24,10 +40,7 @@ def op_dup(ir, instr, element_id):
     e = []
     toto = element_id
 
-    elem_to_dup = ExprMem(SP - ExprInt256( element_id *SIZE_WORD), SIZE_WORD)
-
-    e.append(ExprAff(ExprMem(SP, SIZE_WORD), elem_to_dup))
-    e.append(ExprAff(SP, SP + ExprInt256(1*SIZE_WORD)))
+    _stack_push(_stack_item(element_id-1),e)
 
     return e, []
 
@@ -57,16 +70,16 @@ def op_swap(ir, instr, element_id):
     return e, []
 
 
-def op_add(ir, isntr):
+def op_add(ir, irntr):
     """
     SP[O] = SP[0] + SP[1]
     """
     e = []
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), ExprOp('+', arg1, arg2)))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(1), ExprOp('+', arg1, arg2)))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
     return e,[]
@@ -76,11 +89,11 @@ def op_mul(ir, isntr):
     SP[O] = SP[0] * SP[1]
     """
     e = []
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), ExprOp('*', arg1, arg2)))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(1), ExprOp('*', arg1, arg2)))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
     return e,[]
@@ -90,80 +103,80 @@ def op_sub(ir, isntr):
     SP[O] = SP[0] - SP[1]
     """
     e = []
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), ExprOp('-', arg1, arg2)))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(1), ExprOp('-', arg1, arg2)))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
     return e,[]
 
 def op_div(ir, isntr):
     """
-    SP[O] = SP[0] / SP[1]
+    SP[O] = SP[0] / SP[1] or 0 if SP[1] == 0
     """
     e = []
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
 
-    res = ExprCond( ExprOp("==",arg1, ExprInt256(0)),
-                    ExprInt256(0),
-                    ExprOp("/", arg1, arg2) )
+    res = ExprCond( ExprOp_equal(arg2, ExprInt256(0)),
+             ExprInt256(0),
+             arg1/arg2
+            )
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), res))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(1), res) )
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
     return e,[]
-
 
 def op_sdiv(ir, isntr):
     """
     SP[O] = SP[0] /. SP[1]
     """
     e = []
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
+    raise Exception("sdiv to implement ...")
 
-    res = ExprCond( ExprOp("==",arg1, ExprInt256(0)),
+    res = ExprCond( ExprOp_equal(arg2, ExprInt256(0)),
                     ExprInt256(0),
-                    ExprOp("/", arg1, arg2) )
+                    ExprOp("idiv", arg1, arg2)
+                   )
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), res.signExtend))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(1), res))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
 def op_mod(ir, instr):
 
     e = []
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
 
-    res = ExprCond( ExprOp("==",arg1, ExprInt256(0)),
-                    ExprInt256(0),
-                    ExprOp("%", arg1, arg2) )
+    res = ExprCond( arg2,
+                    arg1 % arg2,
+                    ExprInt256(0))
     
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), res))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(1), res))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
     return e,[]
 
 def op_smod(ir, instr):
-
-    raise Exception("smod to implement ...")
-
     e = []
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
 
-    res = ExprCond( ExprOp("==",arg1, ExprInt256(0)),
+    res = ExprCond( ExprOp_equal(arg1, ExprInt256(0)),
                     ExprInt256(0),
-                    ExprOp("%", arg1, arg2) )
+                    ExprOp("imod", arg1, arg2)
+                   )
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), res))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(1), res))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
     return e,[]
@@ -171,14 +184,40 @@ def op_smod(ir, instr):
 def op_addmod(ir, instr):
 
     e = []
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
+    arg3 = _stack_item(2)
 
+    res = ExprCond( ExprOp_equal(arg3, ExprInt256(0)),
+                    ExprInt256(0),
+                    (arg1 + arg2) % arg3
+                    )
 
+    e.append(ExprAff(_stack_item(2), res))
+    e.append(ExprAff(_stack_item(1), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), ExprOp('%', arg1, arg2)))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
-    e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
+    e.append(ExprAff(SP, SP - ExprInt256(2*SIZE_WORD)))
+
+    return e,[]
+
+def op_mulmod(ir, instr):
+
+    e = []
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
+    arg3 = _stack_item(2)
+
+    res = ExprCond( ExprOp_equal(arg3, ExprInt256(0)),
+                    ExprInt256(0),
+                    (arg1 * arg2) % arg3
+                    )
+
+    e.append(ExprAff(_stack_item(2), res))
+    e.append(ExprAff(_stack_item(1), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
+
+    e.append(ExprAff(SP, SP - ExprInt256(2*SIZE_WORD)))
 
     return e,[]
 
@@ -188,11 +227,28 @@ def op_exp(ir, instr):
     """
     e = []
 
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), ExprOp('pow', arg1, arg2)))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(1), ExprOp('**', arg1, arg2)))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
+    e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
+
+    return e, []
+
+def op_signextend(ir, instr):
+    """
+    Extend length of 2 complement signed integer
+    """
+    e = []
+
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
+
+    raise Exception("Currently ExprSlice can not take ExprInt :(")
+
+    e.append(ExprAff(_stack_item(1), ExprOp('**', arg1, arg2)))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
     return e, []
@@ -203,11 +259,16 @@ def op_lt(ir, instr):
     """
     e = []
 
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), ExprOp('<', arg1, arg2).zeroExtend(256)))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    if compare_exprs(arg1,arg2) == -1:
+        res = ExprInt256(1)
+    else:
+        res =  ExprInt256(0)
+
+    e.append(ExprAff(_stack_item(1), res))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
     return e, []
 
@@ -217,11 +278,16 @@ def op_gt(ir, instr):
     """
     e = []
 
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), ExprOp('>', arg1, arg2)))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    if compare_exprs(arg1,arg2) == 1:
+        res = ExprInt256(1)
+    else:
+        res =  ExprInt256(0)
+
+    e.append(ExprAff(_stack_item(1), res))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
     return e, []
 
@@ -230,12 +296,15 @@ def op_slt(ir, instr):
     Signed less-than comparison
     """
     e = []
-    raise NotImplementedError('%s' % instr.name)
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), ExprOp('<', arg1, arg2)))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
+
+    res = ExprOp_inf_signed(arg1, arg2).zeroExtend(256)
+
+    e.append(ExprAff(_stack_item(1), res))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
+
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
     return e, []
 
@@ -244,12 +313,15 @@ def op_sgt(ir, instr):
     Signed greather-than comparison
     """
     e = []
-    raise NotImplementedError('%s' % instr.name)
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), ExprOp('>', arg1, arg2)))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
+
+    res = ExprOp_inf_signed(arg2, arg1).zeroExtend(256)
+
+    e.append(ExprAff(_stack_item(1), res))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
+
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
     return e, []
 
@@ -259,11 +331,13 @@ def op_eq(ir, instr):
     """
     e = []
 
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), ExprOp('==', arg1, arg2).zeroExtend(256)))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    res = ExprOp_equal(arg2, arg1).zeroExtend(256)
+
+    e.append(ExprAff(_stack_item(1), res))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
     return e, []
@@ -274,9 +348,11 @@ def op_iszero(ir, instr):
     Equality comparision
     """
     e = []
+    arg1 = _stack_item(0)
 
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), ExprOp('==', arg1, ExprInt256(0)).zeroExtend(256)))
+    res = ExprOp_equal(arg1, ExprInt256(0)).zeroExtend(256)
+
+    e.append(ExprAff(_stack_item(0), res))
 
     return e, []
 
@@ -287,13 +363,42 @@ def op_and(ir, instr):
     """
     e = []
 
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg2 = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), ExprOp('&', arg1, arg2)))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(1), ExprOp('&', arg1, arg2)))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
+    return e, []
+
+def op_or(ir, instr):
+    """
+    Bitwise OR operation
+    """
+    e = []
+
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
+
+    e.append(ExprAff(_stack_item(1), ExprOp('|', arg1, arg2)))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
+    e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
+
+    return e, []
+
+def op_xor(ir, instr):
+    """
+    Bitwise XOR operation
+    """
+    e = []
+
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
+
+    e.append(ExprAff(_stack_item(1), ExprOp('^', arg1, arg2)))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
+    e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
     return e, []
 
@@ -303,10 +408,28 @@ def op_not(ir, instr):
     """
     e = []
 
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    arg1 = ~ arg1
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), arg1))
+    e.append(ExprAff(_stack_item(0), ~ _stack_item(0)))
 
+    return e, []
+
+def op_byte(ir, instr):
+    """
+    Retrieve single byte from word
+
+    Currently Slice can not take ExprInt :(
+    """
+    e = []
+
+    arg1 = _stack_item(0)
+    arg2 = _stack_item(1)
+
+    raise Exception("Currently ExprSlice can not take ExprInt :(")
+
+    res = ExprSlice(arg2, arg2, arg1 + ExprInt256(8))
+
+    e.append(ExprAff(_stack_item(1), res ))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
+    e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
     return e, []
 
@@ -316,27 +439,27 @@ def op_sha3(ir, instr):
     """
     e = []
 
-    start = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    stop = ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD)
+    start = _stack_item(0)
+    stop = _stack_item(1)
 
     stor_mem_id = ExprId("storage_%s_%s" % (start, stop), SIZE_WORD)
     stor_mem = ExprOp("storage",stor_mem_id)
 
     sha = ExprOp('sha', stor_mem)
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD), sha.zeroExtend(256)))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(1), sha.zeroExtend(256)))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
     return e, []
 
 def op_jump(ir, instr):
     e = []
-    dst_addr = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
-    e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
 
-    print dst_addr
+    dst_addr = _stack_item(0)
+
     e.append(ExprAff(ir.IRDst, dst_addr))
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
+    e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
     return e, []
 
@@ -356,17 +479,29 @@ def undef(ir, instr):
 
 
 def op_jumpi(ir, instr):
+    """
+    Conditionnal jump.
+    Jump if stack[0] == 0 else PC++
+    """
+
     e = []
-    dst_addr = ExprId("dst",256)
-    cond = ExprId("cond",256)
-    dst_addr = ExprAff( dst_addr, ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD))
-    cond = ExprAff( cond, ExprMem(SP - ExprInt256(2*SIZE_WORD), SIZE_WORD))
-    new_pc = ExprCond( ExprOp("==", cond, ExprInt256(0)),
-                       ir.IRDst + ExprInt256(1),
-                       dst_addr )
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ExprInt256(0)))
-    e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
+
+    dst_addr = _stack_item(0)
+    cond = _stack_item(1)
+    
+    new_pc = ExprCond( cond,
+                       dst_addr,
+                       ir.IRDst + ExprInt256(1)  # if 0
+                       )
+
     e.append(ExprAff(ir.IRDst, new_pc))
+
+    # Set zero in the two first stack elements
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(1), ExprInt256(0)))
+    # SP = SP - 2
+    e.append(ExprAff(SP, SP - ExprInt256(2*SIZE_WORD)))
+
 
     return e, []
 
@@ -386,9 +521,9 @@ def op_balance(ir, instr):
     Get balance of currently executing account
     """
     e = []
-    arg1 = ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD)
+    arg1 = _stack_item(0)
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), 
+    e.append(ExprAff(_stack_item(0), 
                      ExprId("balance_%s"%arg1, SIZE_WORD)))
 
     return e, []
@@ -421,7 +556,7 @@ def op_calldata(ir, instr):
     Get input data in current environment to memory
     """
     e = []
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ir.calldata))
+    e.append(ExprAff(_stack_item(0), ir.calldata))
 
     return e, []
 
@@ -440,7 +575,7 @@ def op_sload(ir, instr):
     """
     e = []
 
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD),
+    e.append(ExprAff(_stack_item(0),
                      ExprId("storage_%s" % ExprMem(SP , SIZE_WORD), SIZE_WORD))
             )
 
@@ -469,7 +604,7 @@ def op_blockhash(ir, instr):
     Get the block's number
     """
     e = []
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ir.block_hash))
+    e.append(ExprAff(_stack_item(0), ir.block_hash))
 
     return e, []
 
@@ -478,7 +613,18 @@ def op_number(ir, instr):
     Get the block's number
     """
     e = []
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ir.block_number))
+    e.append(ExprAff(_stack_item(0), ir.block_number))
+
+    return e, []
+
+def op_pop(ir, instr):
+    """
+    Remove item from stack
+    """
+    e = []
+
+    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD),SIZE_WORD), ExprInt256(0)))
+    e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
     return e, []
 
@@ -487,12 +633,14 @@ def op_timestamp(ir, instr):
     Get the block's timestamp
     """
     e = []
-    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD), SIZE_WORD), ir.block_timestamp))
+    e.append(ExprAff(_stack_item(0), ir.block_timestamp))
 
     return e, []
 
+#mnemo_func = sbuild.functions
 
 mnemo_func = {
+#mnemo_func.update({
     "STOP"         : op_stop,
     "ADD"          : op_add,
     "MUL"          : op_mul,
@@ -500,10 +648,10 @@ mnemo_func = {
     "DIV"          : op_div,
     "SDIV"         : op_sdiv,
     "MOD"          : op_mod,
-    "ADDMOD"       : undef,
-    "MULMOD"       : undef,
+    "ADDMOD"       : op_addmod,
+    "MULMOD"       : op_mulmod,
     "EXP"          : op_exp,
-    "SIGNEXTEND"   : undef,
+    "SIGNEXTEND"   : op_signextend,
     "LT"           : op_lt,
     "GT"           : op_gt,
     "SLT"          : op_slt,
@@ -511,10 +659,10 @@ mnemo_func = {
     "EQ"           : op_eq,
     "ISZERO"       : op_iszero,
     "AND"          : op_and,
-    "OR"           : undef,
-    "XOR"          : undef,
+    "OR"           : op_or,
+    "XOR"          : op_xor,
     "NOT"          : op_not,
-    "BYTE"         : undef,
+    "BYTE"         : op_byte,
 
     "SHA3"         : op_sha3,
     "ADDRESS"      : op_address,
@@ -538,7 +686,7 @@ mnemo_func = {
     "DIFFICULTY"   : undef,
     "GASLIMIT"     : undef,
 
-    "POP"          : undef,
+    "POP"          : op_pop,
     "MLOAD"        : undef,
     "MSTORE"       : op_mstore,
     "MSTORES"      : undef,
@@ -566,9 +714,8 @@ mnemo_func = {
     "DELEGATECALL"  : undef,
     "SUICIDE"       : undef,
 
+#})
 }
-
-import copy
 
 for i in xrange(1, 33):
     mnemo_func["PUSH%d"%i] = op_push
@@ -582,6 +729,10 @@ for i in xrange(1, 17):
 for i in xrange(0, 5):
     mnemo_func["LOG%d"%i] = lambda ir, instr, num_topic=i : op_log(ir, instr, num_topic)
 
+
+def get_mnemo_expr(ir, instr, *args):
+    instr, extra_ir = mnemo_func[instr.name.upper()](ir, instr, *args)
+    return instr, extra_ir
 
 class ir_evm(ir):
 
@@ -605,9 +756,20 @@ class ir_evm(ir):
         pass
 
     def get_ir(self, instr):
-        #print instr#, args
 
         args = instr.args
-        instr_ir, extra_ir = mnemo_func[instr.name](self, instr, *args)
+        instr_ir, extra_ir = get_mnemo_expr(self, instr, *args)
+
+        # TODO : PC incrementation is not always +1 (when PUSH xxx )
+        for i, x in enumerate(instr_ir):
+            x = ExprAff(x.dst, x.src.replace_expr(
+                {self.pc: ExprInt256(instr.offset + 1)}))
+            instr_ir[i] = x
+        for b in extra_ir:
+            for irs in b.irs:
+                for i, x in enumerate(irs):
+                    x = ExprAff(x.dst, x.src.replace_expr(
+                        {self.pc: ExprInt256(instr.offset + 1)}))
+                    irs[i] = x
 
         return instr_ir, extra_ir
