@@ -11,6 +11,7 @@ from miasm2.expression.simplifications_cond import ExprOp_inf_signed, ExprOp_inf
 from miasm2.arch.evm.regs import *
 from miasm2.arch.evm.arch import mn_evm
 from miasm2.ir.ir import ir
+from miasm2.arch.evm.env import *
 
 SIZE_WORD = 256
 
@@ -518,13 +519,13 @@ def op_address(ir, instr):
 
 def op_balance(ir, instr):
     """
-    Get balance of currently executing account
+    Get balance of currently executing account.
     """
     e = []
     arg1 = _stack_item(0)
 
-    e.append(ExprAff(_stack_item(0), 
-                     ExprId("balance_%s"%arg1, SIZE_WORD)))
+    v = ExprOp("evm_balance", arg1)
+    e.append(ExprAff(_stack_item(0), v))
 
     return e, []
 
@@ -575,9 +576,7 @@ def op_sload(ir, instr):
     """
     e = []
 
-    e.append(ExprAff(_stack_item(0),
-                     ExprId("storage_%s" % ExprMem(SP , SIZE_WORD), SIZE_WORD))
-            )
+    e.append(ExprAff(_stack_item(0), ExprOp("evm_sload", _stack_item(0))))
 
     return e, []
 
@@ -587,7 +586,7 @@ def op_mstore(ir, instr):
     """
     e = []
 
-    print "TODO  mstore"
+    e.append(ExprAff(_stack_item(0), ExprOp("evm_mstore", _stack_item(0))))
 
     return e, []
 
@@ -597,6 +596,27 @@ def op_call(ir, instr):
     """
     e = []
     print "TO IMPLEMENT ! " 
+    return e, []
+
+def op_extcodesize(ir, instr):
+    """
+    Load word from storage
+    """
+    e = []
+
+    e.append(ExprAff(_stack_item(0), ExprOp("evm_extcodesize", _stack_item(0))))
+
+    return e, []
+
+def op_extcodecopy(ir, instr):
+    """
+    Copy an account's code to memory.
+    """
+    e = []
+
+    e.append(ExprOp("evm_extcodecopy", _stack_item(0),_stack_item(1),_stack_item(2),_stack_item(3)))
+    e.append(ExprAff(SP, SP - ExprInt256(4*SIZE_WORD)))
+
     return e, []
 
 def op_blockhash(ir, instr):
@@ -627,6 +647,55 @@ def op_pop(ir, instr):
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
     return e, []
+
+def op_mload(ir, instr):
+    """
+    Load word from memory
+    """
+    e = []
+
+    e.append(ExprAff(_stack_item(0), ExprOp("evm_mload", _stack_item(0))))
+
+    return e, []
+
+def op_mstore(ir, instr):
+    """
+    Save word to memory
+    """
+    e = []
+
+
+    return e, []
+
+def op_mstore8(ir, instr):
+    """
+    Save byte to memory
+    """
+    e = []
+
+
+    return e, []
+
+def op_sload(ir, instr):
+    """
+    Load word from storage
+    """
+    e = []
+
+    e.append(ExprAff(_stack_item(0), ExprOp("evm_sload", _stack_item(0))))
+
+    return e, []
+
+
+def op_sstore(ir, instr):
+    """
+    Save word to memory
+    """
+    e = []
+
+
+    return e, []
+
 
 def op_timestamp(ir, instr):
     """
@@ -676,8 +745,8 @@ mnemo_func = {
     "CODESIZE"     : undef,
     "CODECOPY"     : undef,
     "GASPRICE"     : undef,
-    "EXTCODESIZE"  : undef,
-    "EXTCODECOPY"  : undef,
+    "EXTCODESIZE"  : op_extcodesize,
+    "EXTCODECOPY"  : op_extcodecopy,
 
     "BLOCKHASH"    : op_blockhash,
     "COINBASE"     : undef,
@@ -687,11 +756,11 @@ mnemo_func = {
     "GASLIMIT"     : undef,
 
     "POP"          : op_pop,
-    "MLOAD"        : undef,
+    "MLOAD"        : op_mload,
     "MSTORE"       : op_mstore,
-    "MSTORES"      : undef,
+    "MSTORE8"      : undef,
     "SLOAD"        : op_sload,
-    "SSTORE"       : undef,
+    "SSTORE"       : op_sstore,
     "JUMP"         : op_jump,
     "JUMPI"        : op_jumpi,
     "PC"           : undef,

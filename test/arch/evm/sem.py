@@ -20,8 +20,17 @@ from miasm2.expression.simplifications import expr_simp
 logging.getLogger('cpuhelper').setLevel(logging.ERROR)
 EXCLUDE_REGS = set([ir_arch().IRDst])
 
+
+
+from miasm2.arch.evm.env import *
+import miasm2.expression.expression as m2_expr
+ExpressionSimplifier.EVM_PASS = {}
+ExpressionSimplifier.EVM_PASS[m2_expr.ExprOp] = [evm_expr_simplification]
+
 # Add ExprCond resolver 
 expr_simp.enable_passes(ExpressionSimplifier.PASS_COND)
+# Add EVM_PASS to resolve evm_xxx operators
+expr_simp.enable_passes(ExpressionSimplifier.EVM_PASS)
 
 def M(pos):
     return ExprMem(ExprInt256(pos*256), 256)
@@ -681,7 +690,6 @@ PUSH1 0x42
 JUMPDEST
 """
         res = compute_text(asm_text, {SP: 0})
-        print res
         self.assertEqual(res,
                          {
                             M(0): 0x42,
@@ -701,6 +709,45 @@ POP
                             SP: SP_pos(0)
                           }
                         )
+
+
+###################################
+# Tests with the blockchain
+###################################
+
+    def test_balance(self):
+        asm_text = """
+PUSH32 0x4f35f119145b8d599d2b70b37c73086f71cd416b
+BALANCE
+"""
+        # Random ethereum account https://etherscan.io/address/0x4f35f119145b8d599d2b70b37c73086f71cd416b
+
+        res = compute_text(asm_text, {SP: 0})
+
+        self.assertEqual(res,
+                         {
+                            M(0): int(1.50390625e+21),
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_extcodesize(self):
+        asm_text = """
+PUSH32 0x7011f3edc7fa43c81440f9f43a6458174113b162
+EXTCODESIZE
+"""
+#https://etherscan.io/address/0x7011f3edc7fa43c81440f9f43a6458174113b162
+
+        res = compute_text(asm_text, {SP: 0})
+        print res
+
+        self.assertEqual(res,
+                         {
+                            M(0): 3238,
+                            SP: SP_pos(1)
+                          }
+                        )
+
 
 if __name__ == '__main__':
     testsuite = unittest.TestLoader().loadTestsFromTestCase(TestEVMSemantic)
