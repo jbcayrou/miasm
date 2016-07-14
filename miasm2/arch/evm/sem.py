@@ -14,6 +14,7 @@ from miasm2.ir.ir import ir
 from miasm2.arch.evm.env import *
 
 SIZE_WORD = 256
+MEM_BASE_CALLDATA = 0xffff0000 # Base address where are store the input data.
 
 def _stack_item(pos):
     """
@@ -352,7 +353,6 @@ def op_iszero(ir, instr):
     arg1 = _stack_item(0)
 
     res = ExprOp_equal(arg1, ExprInt256(0)).zeroExtend(256)
-
     e.append(ExprAff(_stack_item(0), res))
 
     return e, []
@@ -489,7 +489,7 @@ def op_jumpi(ir, instr):
 
     dst_addr = _stack_item(0)
     cond = _stack_item(1)
-    
+
     new_pc = ExprCond( cond,
                        dst_addr,
                        ir.IRDst + ExprInt256(1)  # if 0
@@ -512,8 +512,17 @@ def op_address(ir, instr):
     """
     e = []
 
-    e.append(ExprAff(ExprMem(SP , SIZE_WORD), ir.address))
-    e.append(ExprAff(SP, SP + ExprInt256(1*SIZE_WORD)))
+    _stack_push(ir.address, e)
+
+    return e, []
+
+def op_origin(ir, instr):
+    """
+    Get execution origination address.
+    """
+    e = []
+
+    _stack_push(ir.origin, e)
 
     return e, []
 
@@ -536,8 +545,7 @@ def op_caller(ir, instr):
     """
     e = []
 
-    e.append(ExprAff(ExprMem(SP , SIZE_WORD), ir.caller))
-    e.append(ExprAff(SP, SP + ExprInt256(1*SIZE_WORD)))
+    _stack_push(ir.caller, e)
 
     return e, []
 
@@ -547,8 +555,7 @@ def op_callvalue(ir, instr):
     """
     e = []
 
-    e.append(ExprAff(ExprMem(SP , SIZE_WORD), ir.callvalue))
-    e.append(ExprAff(SP, SP + ExprInt256(1*SIZE_WORD)))
+    _stack_push(ir.callvalue, e)
 
     return e, []
 
@@ -557,7 +564,10 @@ def op_calldata(ir, instr):
     Get input data in current environment to memory
     """
     e = []
-    e.append(ExprAff(_stack_item(0), ir.calldata))
+
+    arg = _stack_item(0)
+
+    e.append(ExprAff(_stack_item(0), ExprMem(ExprInt256(MEM_BASE_CALLDATA * SIZE_WORD)+arg * ExprInt256(SIZE_WORD), SIZE_WORD)))
 
     return e, []
 
@@ -568,25 +578,7 @@ def op_calldatasize(ir, instr):
     """
     e = []
 
-    return e, []
-
-def op_sload(ir, instr):
-    """
-    Load word from storage
-    """
-    e = []
-
-    e.append(ExprAff(_stack_item(0), ExprOp("evm_sload", _stack_item(0))))
-
-    return e, []
-
-def op_mstore(ir, instr):
-    """
-    Load word from storage
-    """
-    e = []
-
-    e.append(ExprAff(_stack_item(0), ExprOp("evm_mstore", _stack_item(0))))
+    _stack_push(ir.calldatasize, e)
 
     return e, []
 
@@ -624,7 +616,8 @@ def op_blockhash(ir, instr):
     Get the block's number
     """
     e = []
-    e.append(ExprAff(_stack_item(0), ir.block_hash))
+
+    _stack_push(ir.block_hash, e)
 
     return e, []
 
@@ -633,7 +626,8 @@ def op_number(ir, instr):
     Get the block's number
     """
     e = []
-    e.append(ExprAff(_stack_item(0), ir.block_number))
+
+    _stack_push(ir.block_number, e)
 
     return e, []
 
@@ -664,6 +658,12 @@ def op_mstore(ir, instr):
     """
     e = []
 
+    # TODO
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(1), ExprInt256(0)))
+    e.append(ExprAff(SP, SP - ExprInt256(2*SIZE_WORD)))
+
+    #e.append(ExprOp("evm_mstore", _stack_item(0)))
 
     return e, []
 
@@ -672,7 +672,13 @@ def op_mstore8(ir, instr):
     Save byte to memory
     """
     e = []
+    
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(1), ExprInt256(0)))
+    e.append(ExprAff(SP, SP - ExprInt256(2*SIZE_WORD)))
 
+    # TODO
+    #e.append(ExprOp("evm_mstore8", _stack_item(0), _stack_item(1)))
 
     return e, []
 
@@ -686,13 +692,16 @@ def op_sload(ir, instr):
 
     return e, []
 
-
 def op_sstore(ir, instr):
     """
     Save word to memory
     """
     e = []
 
+    #TODO
+    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
+    e.append(ExprAff(_stack_item(1), ExprInt256(0)))
+    e.append(ExprAff(SP, SP - ExprInt256(2*SIZE_WORD)))
 
     return e, []
 
@@ -702,7 +711,7 @@ def op_timestamp(ir, instr):
     Get the block's timestamp
     """
     e = []
-    e.append(ExprAff(_stack_item(0), ir.block_timestamp))
+    _stack_push(ir.block_timestamp, e)
 
     return e, []
 
@@ -736,7 +745,7 @@ mnemo_func = {
     "SHA3"         : op_sha3,
     "ADDRESS"      : op_address,
     "BALANCE"      : op_balance,
-    "ORIGIN"       : undef,
+    "ORIGIN"       : op_origin,
     "CALLER"       : op_caller,
     "CALLVALUE"    : op_callvalue,
     "CALLDATALOAD" : op_calldata,
@@ -815,7 +824,8 @@ class ir_evm(ir):
         self.callvalue = R_CALLVALUE
         self.caller = R_CALLER
         self.address = R_ADDRESS
-        self.calldata = R_CALLDATA
+        self.origin = R_ORIGIN
+        self.calldatasize = R_CALLDATASIZE
 
         self.block_number = R_BLOCK_NUMBER
         self.block_hash = R_BLOCK_HASH

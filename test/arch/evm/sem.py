@@ -8,6 +8,7 @@ import binascii
 from miasm2.ir.symbexec import symbexec
 from miasm2.arch.evm.arch import mn_evm as mn
 from miasm2.arch.evm.sem import ir_evm as ir_arch
+from miasm2.arch.evm.sem import MEM_BASE_CALLDATA
 from miasm2.arch.evm.regs import *
 from miasm2.expression.expression import *
 from miasm2.expression.simplifications import ExpressionSimplifier
@@ -49,7 +50,7 @@ def compute(asm, inputstate={}, debug=False):
     sympool.update({k: ExprInt_from(k, v) for k, v in inputstate.iteritems()})
     interm = ir_arch()
     symexec = symbexec(interm, sympool)
-    instr = mn.fromstring(asm)
+    instr = mn.froSring(asm)
     code = mn.asm(instr)[0]
     instr = mn.dis(code)
     instr.offset = inputstate.get(PC, 0)
@@ -87,7 +88,7 @@ def compute_text(asm, inputstate={}, debug=False):
 
     symexec = symbexec(interm, sympool)
 
-    symbolic_pc = symexec.emul_ir_blocs(interm, 0, step=False)
+    symbolic_pc = symexec.emul_ir_blocs(interm, 0, step=True)
     #print symbolic_pc
 
     if debug:
@@ -697,6 +698,26 @@ JUMPDEST
                           }
                         )
 
+    def test_jumpi_sem(self):
+
+        asm_text = """
+CALLDATASIZE
+ISZERO
+PUSH1 0x07
+JUMPI
+PUSH1 0x01
+PUSH1 0x02
+"""
+        res = compute_text(asm_text, {SP:0})
+        print res
+        return
+        self.assertEqual(res,
+                         {
+                            M(0): 0x42,
+                            SP: SP_pos(1)
+                          }
+                        )
+
     def test_pop(self):
         asm_text = """
 PUSH1 0x07
@@ -715,6 +736,20 @@ POP
 # Tests with the blockchain
 ###################################
 
+    def test_address(self):
+        asm_text = """
+ADDRESS
+"""
+        res = compute_text(asm_text, {SP: 0, R_ADDRESS: 0x4f35f119145b8d599d2b70b37c73086f71cd416b })
+
+        self.assertEqual(res,
+                         {
+                            M(0): 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
+                            R_ADDRESS: 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
+                            SP: SP_pos(1)
+                          }
+                        )
+
     def test_balance(self):
         asm_text = """
 PUSH32 0x4f35f119145b8d599d2b70b37c73086f71cd416b
@@ -727,6 +762,95 @@ BALANCE
         self.assertEqual(res,
                          {
                             M(0): int(1.50390625e+21),
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_origin(self):
+        asm_text = """
+ORIGIN
+"""
+        res = compute_text(asm_text, {SP: 0, R_ORIGIN: 0x4f35f119145b8d599d2b70b37c73086f71cd416b })
+
+        self.assertEqual(res,
+                         {
+                            M(0): 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
+                            R_ORIGIN: 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_caller(self):
+        asm_text = """
+CALLER
+"""
+        res = compute_text(asm_text, {SP: 0, R_CALLER: 0x4f35f119145b8d599d2b70b37c73086f71cd416b })
+
+        self.assertEqual(res,
+                         {
+                            M(0): 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
+                            R_CALLER: 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_callvalue(self):
+        asm_text = """
+CALLVALUE
+"""
+        res = compute_text(asm_text, {SP: 0, R_CALLVALUE: 0x1337 })
+
+        self.assertEqual(res,
+                         {
+                            M(0): 0x1337,
+                            R_CALLVALUE: 0x1337,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_calldataload(self):
+        asm_text = """
+PUSH1 0x0
+CALLDATALOAD
+"""
+        # User data input is at MEM_BASE_CALLDATA address
+        res = compute_text(asm_text, {SP: 0, M(MEM_BASE_CALLDATA): 0x1337 })
+
+        self.assertEqual(res,
+                         {
+                            M(0): 0x1337,
+                            M(MEM_BASE_CALLDATA): 0x1337,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+        asm_text = """
+PUSH1 0x01
+CALLDATALOAD
+"""
+        # User data input is at MEM_BASE_CALLDATA address
+        res = compute_text(asm_text, { SP: 0,
+                                       M(MEM_BASE_CALLDATA+1): 0x1336
+                                      })
+        self.assertEqual(res,
+                         {
+                            M(0): 0x1336,
+                            M(MEM_BASE_CALLDATA+1): 0x1336,
+                            SP: SP_pos(1)
+                          }
+                        )
+
+    def test_calldatasize(self):
+        asm_text = """
+CALLDATASIZE
+"""
+        # User data input is at MEM_BASE_CALLDATA address
+        res = compute_text(asm_text, {SP: 0 , R_CALLDATASIZE: 0x12})
+
+        self.assertEqual(res,
+                         {
+                            M(0): 0x12,
+                            R_CALLDATASIZE: 0x12,
                             SP: SP_pos(1)
                           }
                         )

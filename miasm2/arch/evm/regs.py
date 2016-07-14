@@ -34,8 +34,11 @@ regs256_str = [ "PC", "PC_init",
                 "GAS", "GAS_init",
                 "STORAGE", "STORAGE_init",
                 "ST", "ST_init",
-                "R_CALLVALUE", "R_CALLER", "R_ADDRESS",
-                "R_BLOCK_NUMBER", "R_BLOCK_HASH", "R_BLOCK_TIMESTAMP", "R_CALLDATA"]
+                "R_CALLVALUE", "R_CALLER", "R_ADDRESS", "R_ORIGIN",
+                "R_BLOCK_NUMBER", "R_BLOCK_HASH", "R_BLOCK_TIMESTAMP",
+                "R_CALLDATASIZE"]
+
+R_CALLDATALOAD = ""
 
 # Foreach regs256_str elements generate a ExprId of 256 bits
 gen_regs(regs256_str, globals(), 256)
