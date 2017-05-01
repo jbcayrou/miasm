@@ -17,7 +17,7 @@
 	}								\
 
 
-#define PyGetInt_ret0(item, value)					\
+#define PyGetInt_retneg(item, value)					\
 	if (PyInt_Check(item)){						\
 		value = (uint64_t)PyInt_AsLong(item);			\
 	}								\
@@ -25,7 +25,8 @@
 		value = (uint64_t)PyLong_AsUnsignedLongLong(item);	\
 	}								\
 	else{								\
-		printf("error\n"); return 0;				\
+		PyErr_SetString(PyExc_TypeError, "Arg must be int");	\
+		return -1;						\
 	}								\
 
 
@@ -38,7 +39,7 @@
 	static int JitCpu_set_ ## regname  (JitCpu *self, PyObject *value, void *closure) \
 	{								\
 		uint64_t val;						\
-		PyGetInt_ret0(value, val);				\
+		PyGetInt_retneg(value, val);				\
 		((vm_cpu_t*)(self->cpu))->  regname   = val;		\
 		return 0;						\
 	}
@@ -51,7 +52,7 @@
 	static int JitCpu_set_ ## regname  (JitCpu *self, PyObject *value, void *closure) \
 	{								\
 		uint32_t val;						\
-		PyGetInt_ret0(value, val);				\
+		PyGetInt_retneg(value, val);				\
 		((vm_cpu_t*)(self->cpu))->  regname   = val;		\
 		return 0;						\
 	}
@@ -65,8 +66,8 @@
 	static int JitCpu_set_ ## regname  (JitCpu *self, PyObject *value, void *closure) \
 	{								\
 		uint16_t val;						\
-		PyGetInt_ret0(value, val);				\
-		((vm_cpu_t*)(self->cpu))->  regname   = val;				\
+		PyGetInt_retneg(value, val);				\
+		((vm_cpu_t*)(self->cpu))->  regname   = val;		\
 		return 0;						\
 	}
 
@@ -92,7 +93,7 @@ typedef struct {
 
 typedef struct {
 	PyObject_HEAD
-	PyObject *pyvm;
+	VmMngr *pyvm;
 	PyObject *jitter;
 	void* cpu;
 } JitCpu;
@@ -129,10 +130,9 @@ PyObject* vm_get_mem(JitCpu *self, PyObject* args);
 
 
 
-
-#define VM_exception_flag (((VmMngr*)jitcpu->pyvm)->vm_mngr.exception_flags)
+#define VM_exception_flag (jitcpu->pyvm->vm_mngr.exception_flags)
 #define CPU_exception_flag (((vm_cpu_t*)jitcpu->cpu)->exception_flags)
-
+#define CPU_exception_flag_at_instr ((CPU_exception_flag) && ((CPU_exception_flag) > EXCEPT_NUM_UPDT_EIP))
 #define JIT_RET_EXCEPTION 1
 #define JIT_RET_NO_EXCEPTION 0
 

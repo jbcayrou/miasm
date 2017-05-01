@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #-*- coding:utf-8 -*-
 
 import logging
@@ -9,9 +8,9 @@ from collections import defaultdict
 from miasm2.core.bin_stream import bin_stream
 import regs as regs_module
 from regs import *
-from miasm2.core.asmbloc import asm_label
+from miasm2.core.asmblock import AsmLabel
 from miasm2.core.cpu import log as log_cpu
-from miasm2.expression.modint import uint32, uint64
+from miasm2.expression.modint import uint32, uint64, mod_size2int
 import math
 
 log = logging.getLogger("aarch64dis")
@@ -63,8 +62,8 @@ replace_regs = {
 
     WSP: SP[:32],
 
-    WZR: m2_expr.ExprInt32(0),
-    XZR: m2_expr.ExprInt64(0),
+    WZR: m2_expr.ExprInt(0, 32),
+    XZR: m2_expr.ExprInt(0, 64),
 
 }
 
@@ -75,34 +74,29 @@ _, _, base_expr64 = gen_base_expr()
 
 
 def ast_id2expr32(t):
-    if not t in mn_aarch64.regs.all_regs_ids_byname:
-        r = m2_expr.ExprId(asm_label(t))
-    else:
-        r = mn_aarch64.regs.all_regs_ids_byname[t]
-    if not r.size == 32:
-        raise StopIteration
-    return r
-
+    if t in mn_aarch64.regs.all_regs_ids_byname:
+        t = mn_aarch64.regs.all_regs_ids_byname[t]
+        if not t.size == 32:
+            raise StopIteration
+    return t
 
 def ast_int2expr32(a):
-    return m2_expr.ExprInt32(a)
+    return m2_expr.ExprInt(a, 32)
 
 
 def ast_id2expr64(t):
-    if not t in mn_aarch64.regs.all_regs_ids_byname:
-        r = m2_expr.ExprId(asm_label(t))
-    else:
-        r = mn_aarch64.regs.all_regs_ids_byname[t]
-    if not r.size == 64:
-        raise StopIteration
-    return r
+    if t in mn_aarch64.regs.all_regs_ids_byname:
+        t = mn_aarch64.regs.all_regs_ids_byname[t]
+        if not t.size == 64:
+            raise StopIteration
+    return t
 
 
 def ast_int2expr64(a):
-    return m2_expr.ExprInt64(a)
+    return m2_expr.ExprInt(a, 64)
 
-my_var_parser32 = parse_ast(ast_id2expr32, ast_int2expr32)
-my_var_parser64 = parse_ast(ast_id2expr64, ast_int2expr64)
+my_var_parser32 = ParseAst(ast_id2expr32, ast_int2expr32, default_size=32)
+my_var_parser64 = ParseAst(ast_id2expr64, ast_int2expr64, default_size=64)
 
 base_expr32.setParseAction(my_var_parser32)
 base_expr64.setParseAction(my_var_parser64)
@@ -135,7 +129,7 @@ def shift2expr(t):
         return t[0]
     elif len(t) == 3:
         if t[0].size == 32 and isinstance(t[2], m2_expr.ExprInt):
-            t[2] = m2_expr.ExprInt32(t[2].arg)
+            t[2] = m2_expr.ExprInt(int(t[2]), 32)
         return m2_expr.ExprOp(t[1], t[0], t[2])
     else:
         raise ValueError('bad string')
@@ -146,7 +140,7 @@ def shift2expr_sc(t):
         return t[0]
     elif len(t) == 3:
         if t[0].size == 32 and isinstance(t[2], m2_expr.ExprInt):
-            t[2] = m2_expr.ExprInt32(t[2].arg)
+            t[2] = m2_expr.ExprInt(t[2].arg, 32)
         if t[1] != '<<':
             raise ValueError('bad op')
         return m2_expr.ExprOp("slice_at", t[0], t[2])
@@ -165,6 +159,18 @@ def shiftext2expr(t):
         return t[0]
     else:
         return m2_expr.ExprOp(t[1], t[0], t[2])
+
+def expr_deref_pc_off(t):
+    t = t[0]
+    if len(t) == 2 and t[0] == "PC":
+        return ExprOp('preinc', PC, t[1])
+    raise ValueError('bad string')
+
+def expr_deref_pc_nooff(t):
+    t = t[0]
+    if len(t) == 1 and t[0] == "PC":
+        return ExprOp('preinc', PC)
+    raise ValueError('bad string')
 
 all_binaryop_lsl_t = literal_list(
     shift_str).setParseAction(op_shift2expr)
@@ -213,14 +219,14 @@ simdregs_h_zero = (simd32_info.parser |
 
 def ast_id2expr(t):
     if not t in mn_aarch64.regs.all_regs_ids_byname:
-        r = m2_expr.ExprId(asm_label(t))
+        r = m2_expr.ExprId(AsmLabel(t))
     else:
         r = mn_aarch64.regs.all_regs_ids_byname[t]
     return r
 
 
 def ast_int2expr(a):
-    return m2_expr.ExprInt64(a)
+    return m2_expr.ExprInt(a, 64)
 
 gpregs_info = {32: gpregs32_info,
                64: gpregs64_info}
@@ -235,14 +241,14 @@ simds_info = {8: simd08_info,
               128: simd128_info}
 
 
-my_var_parser = parse_ast(ast_id2expr, ast_int2expr)
+my_var_parser = ParseAst(ast_id2expr, ast_int2expr)
 base_expr.setParseAction(my_var_parser)
 
 
 def deref2expr_nooff(t):
     t = t[0]
     # XXX default
-    return m2_expr.ExprOp("preinc", t[0], m2_expr.ExprInt64(0))
+    return m2_expr.ExprOp("preinc", t[0], m2_expr.ExprInt(0, 64))
 
 
 def deref2expr_post(t):
@@ -281,6 +287,11 @@ deref_off_pre_wb = Group(LBRACK + gpregs64_info.parser + COMMA +
 
 deref = (deref_off_post | deref_off_pre_wb | deref_off_pre | deref_nooff)
 
+
+deref_pc_off = Group(LBRACK + Literal("PC") + COMMA + int_or_expr64 + RBRACK).setParseAction(expr_deref_pc_off)
+deref_pc_nooff = Group(LBRACK + Literal("PC") + RBRACK).setParseAction(expr_deref_pc_nooff)
+
+deref_pc = (deref_pc_off | deref_pc_nooff)
 
 def deref_ext2op(t):
     t = t[0]
@@ -422,7 +433,7 @@ class instruction_aarch64(instruction):
         off = e.arg - self.offset
         if int(off % 4):
             raise ValueError('strange offset! %r' % off)
-        self.args[index] = m2_expr.ExprInt64(off)
+        self.args[index] = m2_expr.ExprInt(int(off), 64)
 
 
 
@@ -788,15 +799,15 @@ class aarch64_int64_noarg(int32_noarg):
     parser = base_expr
     intsize = 64
     intmask = (1 << intsize) - 1
-    int2expr = lambda self, x: m2_expr.ExprInt64(
-        sign_ext(x, self.l, self.intsize))
+    int2expr = lambda self, x: m2_expr.ExprInt(
+        sign_ext(x, self.l, self.intsize), 64)
 
 
 class aarch64_uint64_noarg(imm_noarg):
     parser = base_expr
     intsize = 64
     intmask = (1 << intsize) - 1
-    int2expr = lambda self, x: m2_expr.ExprInt64(x)
+    int2expr = lambda self, x: m2_expr.ExprInt(x, 64)
 
 
 class aarch64_uint64(aarch64_uint64_noarg, m_arg):
@@ -807,11 +818,11 @@ def set_imm_to_size(size, expr):
     if size == expr.size:
         return expr
     if size > expr.size:
-        expr = m2_expr.ExprInt(int(expr.arg), size)
+        expr = m2_expr.ExprInt(int(expr), size)
     else:
         if expr.arg > (1 << size) - 1:
             return None
-        expr = m2_expr.ExprInt(int(expr.arg), size)
+        expr = m2_expr.ExprInt(int(expr), size)
     return expr
 
 
@@ -838,7 +849,7 @@ class aarch64_imm_sf(imm_noarg):
             return False
         if not test_set_sf(self.parent, self.expr.size):
             return False
-        value = int(self.expr.arg)
+        value = int(self.expr)
         if value >= 1 << self.l:
             return False
         self.value = value
@@ -857,7 +868,7 @@ class aarch64_imm_sft(aarch64_imm_sf, m_arg):
             return False
         if not test_set_sf(self.parent, self.expr.size):
             return False
-        value = int(self.expr.arg)
+        value = int(self.expr)
         if value < 1 << self.l:
             self.parent.shift.value = 0
         else:
@@ -902,7 +913,7 @@ class aarch64_gpreg_ext(reg_noarg, m_arg):
             if not test_set_sf(self.parent, self.expr.size):
                 return False
         self.parent.option.value = option
-        self.parent.imm.value = int(amount.arg)
+        self.parent.imm.value = int(amount)
         return True
 
     def decode(self, v):
@@ -913,7 +924,7 @@ class aarch64_gpreg_ext(reg_noarg, m_arg):
         reg = gpregsz_info[size].expr[v]
 
         self.expr = m2_expr.ExprOp(extend_lst[self.parent.option.value],
-                           reg, m2_expr.ExprInt_from(reg, self.parent.imm.value))
+                           reg, m2_expr.ExprInt(self.parent.imm.value, reg.size))
         return True
 
 EXT2_OP = {0b010: 'UXTW',
@@ -931,6 +942,8 @@ class aarch64_gpreg_ext2(reg_noarg, m_arg):
 
     def encode(self):
         if not isinstance(self.expr, m2_expr.ExprOp):
+            return False
+        if len(self.expr.args) != 2:
             return False
         arg0, arg1 = self.expr.args
         if not (isinstance(self.expr, m2_expr.ExprOp) and self.expr.op == 'segm'):
@@ -983,10 +996,10 @@ class aarch64_gpreg_ext2(reg_noarg, m_arg):
         if opt in EXT2_OP:
             if self.parent.shift.value == 1:
                 arg = m2_expr.ExprOp(EXT2_OP[opt], arg,
-                             m2_expr.ExprInt_from(arg, self.get_size()))
+                             m2_expr.ExprInt(self.get_size(), arg.size))
             else:
                 arg = m2_expr.ExprOp(EXT2_OP[opt], arg,
-                             m2_expr.ExprInt_from(arg, 0))
+                             m2_expr.ExprInt(0, arg.size))
 
         reg = self.parent.rn.reg_info.expr[self.parent.rn.value]
         self.expr = m2_expr.ExprOp('segm', reg, arg)
@@ -1037,7 +1050,7 @@ class aarch64_gpreg_sftimm(reg_noarg, m_arg):
         if not isinstance(args[1], m2_expr.ExprInt):
             return False
         self.parent.shift.value = shift_expr.index(self.expr.op)
-        self.parent.imm.value = int(args[1].arg)
+        self.parent.imm.value = int(args[1])
         self.value = self.reg_info[size].expr.index(args[0])
         return True
 
@@ -1047,7 +1060,7 @@ class aarch64_gpreg_sftimm(reg_noarg, m_arg):
         amount = self.parent.imm.value
         if amount != 0:
             e = m2_expr.ExprOp(
-                shift_expr[self.parent.shift.value], e, m2_expr.ExprInt_from(e, amount))
+                shift_expr[self.parent.shift.value], e, m2_expr.ExprInt(amount, e.size))
         self.expr = e
         return True
 
@@ -1116,11 +1129,11 @@ class aarch64_immhip_page(aarch64_imm_32):
     def decode(self, v):
         v = ((v << 2) | self.parent.immlo.value) << 12
         v = sign_ext(v, 33, 64)
-        self.expr = m2_expr.ExprInt64(v)
+        self.expr = m2_expr.ExprInt(v, 64)
         return True
 
     def encode(self):
-        v = int(self.expr.arg)
+        v = int(self.expr)
         if v & (1 << 63):
             v &= (1 << 33) - 1
         if v & 0xfff:
@@ -1138,11 +1151,11 @@ class aarch64_immhi_page(aarch64_imm_32):
     def decode(self, v):
         v = ((v << 2) | self.parent.immlo.value)
         v = sign_ext(v, 21, 64)
-        self.expr = m2_expr.ExprInt64(v)
+        self.expr = m2_expr.ExprInt(v, 64)
         return True
 
     def encode(self):
-        v = int(self.expr.arg)
+        v = int(self.expr)
         if v & (1 << 63):
             v &= (1 << 33) - 1
         self.parent.immlo.value = v & 3
@@ -1168,7 +1181,7 @@ class aarch64_imm_hw(m_arg):
         size = self.parent.args[0].expr.size
         if set_imm_to_size(size, self.expr) is None:
             return False
-        value = int(self.expr.arg)
+        value = int(self.expr)
         mask = (1 << size) - 1
         for i in xrange(size / 16):
             if ((0xffff << (i * 16)) ^ mask) & value:
@@ -1197,7 +1210,7 @@ class aarch64_imm_hw_sc(m_arg):
         if isinstance(self.expr, m2_expr.ExprInt):
             if self.expr.arg > 0xFFFF:
                 return False
-            self.value = int(self.expr.arg)
+            self.value = int(self.expr)
             self.parent.hw.value = 0
             return True
 
@@ -1211,7 +1224,7 @@ class aarch64_imm_hw_sc(m_arg):
             return False
         if set_imm_to_size(self.parent.args[0].expr.size, self.expr.args[1]) is None:
             return False
-        arg, amount = [int(arg.arg) for arg in self.expr.args]
+        arg, amount = [int(arg) for arg in self.expr.args]
         if arg > 0xFFFF:
             return False
         if amount % 16 or amount / 16 > 4:
@@ -1228,17 +1241,46 @@ class aarch64_offs(imm_noarg, m_arg):
         v = v & self.lmask
         v = (v << 2)
         v = sign_ext(v, (self.l + 2), 64)
-        self.expr = m2_expr.ExprInt64(v)
+        self.expr = m2_expr.ExprInt(v, 64)
         return True
 
     def encode(self):
         if not isinstance(self.expr, m2_expr.ExprInt):
             return False
-        v = int(self.expr.arg)
+        v = int(self.expr)
         if v & (1 << 63):
             v &= (1 << (self.l + 2)) - 1
         self.value = v >> 2
         return True
+
+
+
+class aarch64_offs_pc(imm_noarg, m_arg):
+    parser = deref_pc
+
+    def decode(self, v):
+        v = v & self.lmask
+        v = (v << 2)
+        v = sign_ext(v, (self.l + 2), 64)
+        self.expr = ExprOp("preinc", PC, m2_expr.ExprInt(v, 64))
+        return True
+
+    def encode(self):
+        if not self.expr.is_op('preinc'):
+            return False
+        if self.expr.args == (PC,):
+            v = 0
+        elif (len(self.expr.args) == 2 and
+              self.expr.args[0] == PC and
+              self.expr.args[1].is_int()):
+            v = int(self.expr.args[1])
+        else:
+            return None
+        if v & (1 << 63):
+            v &= (1 << (self.l + 2)) - 1
+        self.value = v >> 2
+        return True
+
 
 
 def set_mem_off(parent, imm):
@@ -1291,7 +1333,7 @@ class aarch64_deref(m_arg):
         off = self.parent.imm.expr.arg
         op = self.get_postpre(self.parent)
         off = self.decode_w_size(off)
-        self.expr = m2_expr.ExprOp(op, reg, m2_expr.ExprInt64(off))
+        self.expr = m2_expr.ExprOp(op, reg, m2_expr.ExprInt(off, 64))
         return True
 
     def encode(self):
@@ -1305,16 +1347,18 @@ class aarch64_deref(m_arg):
                 self.parent.postpre.value = 0
             else:
                 self.parent.postpre.value = 1
+        if len(expr.args) != 2:
+            return False
         reg, off = expr.args
         if not reg in gpregs64_info.expr:
             return False
         if not isinstance(off, m2_expr.ExprInt):
             return False
-        imm = int(off.arg)
+        imm = int(off)
         imm = self.encode_w_size(imm)
         if imm is False:
             return False
-        self.parent.imm.expr = m2_expr.ExprInt64(imm)
+        self.parent.imm.expr = m2_expr.ExprInt(imm, 64)
         if not self.parent.imm.encode():
             return False
         self.value = gpregs64_info.expr.index(reg)
@@ -1417,15 +1461,15 @@ class aarch64_b40(m_arg):
     parser = base_expr
 
     def decode(self, v):
-        self.expr = m2_expr.ExprInt_from(
-            self.parent.rt.expr, (self.parent.sf.value << self.l) | v)
+        self.expr = m2_expr.ExprInt(
+            (self.parent.sf.value << self.l) | v, self.parent.rt.expr.size)
         return True
 
     def encode(self):
         if not isinstance(self.expr, m2_expr.ExprInt):
             return False
         size = self.parent.args[0].expr.size
-        value = int(self.expr.arg)
+        value = int(self.expr)
         self.value = value & self.lmask
         if self.parent.sf.value is None:
             self.parent.sf.value = value >> self.l
@@ -1572,6 +1616,8 @@ bs_adsu_name = bs_name(l=1, name=adsu_name)
 
 
 offs19 = bs(l=19, cls=(aarch64_offs,), fname='off')
+offs19pc = bs(l=19, cls=(aarch64_offs_pc,), fname='off')
+
 offs26 = bs(l=26, cls=(aarch64_offs,), fname='off')
 offs14 = bs(l=14, cls=(aarch64_offs,), fname='off')
 
@@ -1760,11 +1806,11 @@ aarch64op("ldrsw", [bs('10', fname="size"), bs('111'), bs('0'), bs('00'), bs('10
 aarch64op("ldst",  [bs('11', fname="size"), bs('111'), bs('0'), bs('00'), bs('0'), bs_ldst_name, bs('1'), rm_ext2, option, shiftb, bs('10'), rn64_v, rt64], [rt64, rm_ext2])
 
 # load/store literal p.137
-aarch64op("ldr",  [bs('0'), sf, bs('011'), bs('0'), bs('00'), offs19, rt], [rt, offs19])
-aarch64op("ldr",  [bs('10'), bs('011'), bs('0'), bs('00'), offs19, rt64], [rt64, offs19])
+aarch64op("ldr",  [bs('0'), sf, bs('011'), bs('0'), bs('00'), offs19pc, rt], [rt, offs19pc])
+aarch64op("ldrsw",  [bs('10'), bs('011'), bs('0'), bs('00'), offs19pc, rt64], [rt64, offs19pc])
 
 # load/store simd literal p.142
-aarch64op("ldr",  [sdsize, bs('011'), bs('1'), bs('00'), offs19, sd1], [sd1, offs19])
+aarch64op("ldr",  [sdsize, bs('011'), bs('1'), bs('00'), offs19pc, sd1], [sd1, offs19pc])
 
 
 # move wide p.203

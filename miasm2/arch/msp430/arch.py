@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #-*- coding:utf-8 -*-
 
 import logging
@@ -9,7 +8,6 @@ from collections import defaultdict
 from miasm2.core.bin_stream import bin_stream
 import miasm2.arch.msp430.regs as regs_module
 from miasm2.arch.msp430.regs import *
-from miasm2.core.asmbloc import asm_label
 
 log = logging.getLogger("msp430dis")
 console_handler = logging.StreamHandler()
@@ -73,20 +71,16 @@ PINC = Suppress("+")
 
 
 def ast_id2expr(t):
-    if not t in mn_msp430.regs.all_regs_ids_byname:
-        r = ExprId(asm_label(t), 16)
-    else:
-        r = mn_msp430.regs.all_regs_ids_byname[t]
-    return r
+    return mn_msp430.regs.all_regs_ids_byname.get(t, t)
 
 
 def ast_int2expr(a):
-    return ExprInt16(a)
+    return ExprInt(a, 16)
 
 
 variable, operand, base_expr = gen_base_expr()
 
-my_var_parser = parse_ast(ast_id2expr, ast_int2expr)
+my_var_parser = ParseAst(ast_id2expr, ast_int2expr)
 base_expr.setParseAction(my_var_parser)
 
 
@@ -193,7 +187,7 @@ class instruction_msp430(instruction):
         # Call argument is an absolute offset
         # Other offsets are relative to instruction offset
         if self.name != "call":
-            self.args[0] =  ExprInt(int(e.arg) - self.offset, 16)
+            self.args[0] =  ExprInt(int(e) - self.offset, 16)
 
     def get_info(self, c):
         pass
@@ -334,12 +328,12 @@ class msp430_sreg_arg(reg_noarg, m_arg):
                 self.expr = e
         elif self.parent.a_s.value == 0b01:
             if e == SR:
-                self.expr = ExprMem(ExprInt16(self.parent.off_s.value), size)
+                self.expr = ExprMem(ExprInt(self.parent.off_s.value, 16), size)
             elif e == R3:
                 self.expr = ExprInt(1, size)
             else:
                 self.expr = ExprMem(
-                    e + ExprInt16(self.parent.off_s.value), size)
+                    e + ExprInt(self.parent.off_s.value, 16), size)
         elif self.parent.a_s.value == 0b10:
             if e == SR:
                 self.expr = ExprInt(4, size)
@@ -371,7 +365,7 @@ class msp430_sreg_arg(reg_noarg, m_arg):
             self.parent.a_s.value = 0
             self.value = self.reg_info.expr.index(e)
         elif isinstance(e, ExprInt):
-            v = int(e.arg)
+            v = int(e)
             if v == 0xffff and self.parent.size.value == 0:
                 self.parent.a_s.value = 0b11
                 self.value = 3
@@ -404,11 +398,11 @@ class msp430_sreg_arg(reg_noarg, m_arg):
             elif isinstance(e.arg, ExprInt):
                 self.parent.a_s.value = 0b01
                 self.value = self.reg_info.expr.index(SR)
-                self.parent.off_s.value = int(e.arg.arg)
+                self.parent.off_s.value = int(e.arg)
             elif isinstance(e.arg, ExprOp):
                 self.parent.a_s.value = 0b01
                 self.value = self.reg_info.expr.index(e.arg.args[0])
-                self.parent.off_s.value = int(e.arg.args[1].arg)
+                self.parent.off_s.value = int(e.arg.args[1])
             else:
                 raise NotImplementedError(
                     'unknown instance e.arg = %s' % type(e.arg))
@@ -437,9 +431,9 @@ class msp430_dreg_arg(msp430_sreg_arg):
             self.expr = e
         elif self.parent.a_d.value == 1:
             if e == SR:
-                x = ExprInt16(self.parent.off_d.value)
+                x = ExprInt(self.parent.off_d.value, 16)
             else:
-                x = e + ExprInt16(self.parent.off_d.value)
+                x = e + ExprInt(self.parent.off_d.value, 16)
             self.expr = ExprMem(x, size)
         else:
             raise NotImplementedError(
@@ -454,7 +448,7 @@ class msp430_dreg_arg(msp430_sreg_arg):
             self.value = self.reg_info.expr.index(e)
         elif isinstance(e, ExprMem):
             if isinstance(e.arg, ExprId):
-                r, i = e.arg, ExprInt16(0)
+                r, i = e.arg, ExprInt(0, 16)
             elif isinstance(e.arg, ExprOp):
                 r, i = e.arg.args[0], e.arg.args[1]
             elif isinstance(e.arg, ExprInt):
@@ -464,7 +458,7 @@ class msp430_dreg_arg(msp430_sreg_arg):
                     'unknown instance e.arg = %s' % type(e.arg))
             self.parent.a_d.value = 1
             self.value = self.reg_info.expr.index(r)
-            self.parent.off_d.value = int(i.arg)
+            self.parent.off_d.value = int(i)
         else:
             raise NotImplementedError('unknown instance e = %s' % type(e))
         return True
@@ -544,13 +538,13 @@ class msp430_offs(imm_noarg, m_arg):
         if (1 << (self.l - 1)) & v:
             v |= ~0 ^ self.lmask
         v = self.decodeval(v)
-        self.expr = ExprInt16(v)
+        self.expr = ExprInt(v, 16)
         return True
 
     def encode(self):
         if not isinstance(self.expr, ExprInt):
             return False
-        v = int(self.expr.arg)
+        v = int(self.expr)
         if (1 << (self.l - 1)) & v:
             v = -((0xffff ^ v) + 1)
         v = self.encodeval(v)

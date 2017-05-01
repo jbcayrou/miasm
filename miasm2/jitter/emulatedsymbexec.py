@@ -1,17 +1,33 @@
 import miasm2.expression.expression as m2_expr
-from miasm2.ir.symbexec import symbexec
+from miasm2.ir.symbexec import SymbolicExecutionEngine
 
 
-class EmulatedSymbExec(symbexec):
+class EmulatedSymbExec(SymbolicExecutionEngine):
     """Symbolic exec instance linked with a jitter"""
 
-    def __init__(self, cpu, *args, **kwargs):
+    cpuid = {
+        0: {
+            0: 0xa,
+            1: 0x756E6547,
+            2: 0x6C65746E,
+            3: 0x49656E69,
+        },
+        1: {
+            0: 0x00020652,
+            1: 0x00000800,
+            2: 0x00000209,
+            3: 0x078bf9ff
+        },
+    }
+
+    def __init__(self, cpu, vm, *args, **kwargs):
         """Instanciate an EmulatedSymbExec, associated to CPU @cpu and bind
         memory accesses.
         @cpu: JitCpu instance
         """
         super(EmulatedSymbExec, self).__init__(*args, **kwargs)
         self.cpu = cpu
+        self.vm = vm
         self.func_read = self._func_read
         self.func_write = self._func_write
 
@@ -28,6 +44,7 @@ class EmulatedSymbExec(symbexec):
         addr = expr_mem.arg.arg.arg
         size = expr_mem.size / 8
         value = self.cpu.get_mem(addr, size)
+        self.vm.add_mem_read(addr, size)
 
         return m2_expr.ExprInt(int(value[::-1].encode("hex"), 16),
                                expr_mem.size)
@@ -53,6 +70,7 @@ class EmulatedSymbExec(symbexec):
 
         # Write in VmMngr context
         self.cpu.set_mem(addr, content)
+        self.vm.add_mem_write(addr, len(content))
 
     # Interaction symbexec <-> jitter
     def update_cpu_from_engine(self):
@@ -85,18 +103,26 @@ class EmulatedSymbExec(symbexec):
     # CPU specific simplifications
     def _simp_handle_segm(self, e_s, expr):
         """Handle 'segm' operation"""
-        if expr.op != "segm":
+        if not expr.is_op_segm():
             return expr
-        segm_nb = int(expr.args[0].arg)
+        segm_nb = int(expr.args[0])
         segmaddr = self.cpu.get_segm_base(segm_nb)
-        return e_s(m2_expr.ExprOp("+",
-                                  m2_expr.ExprInt(segmaddr, expr.size),
-                                  expr.args[1]))
+        return e_s(m2_expr.ExprInt(segmaddr, expr.size) + expr.args[1])
+
+    def _simp_handle_cpuid(self, e_s, expr):
+        """From miasm2/jitter/vm_mngr.h: cpuid"""
+        if expr.op != "cpuid":
+            return expr
+
+        a, reg_num = (int(x) for x in expr.args)
+
+        # Not found error is keeped on purpose
+        return m2_expr.ExprInt(self.cpuid[a][reg_num], expr.size)
 
     def enable_emulated_simplifications(self):
         """Enable simplifications needing a CPU instance on associated
         ExpressionSimplifier
         """
         self.expr_simp.enable_passes({
-            m2_expr.ExprOp: [self._simp_handle_segm]
+            m2_expr.ExprOp: [self._simp_handle_segm, self._simp_handle_cpuid],
         })

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#! /usr/bin/env python2
 #-*- coding:utf-8 -*-
 import logging
 from pdb import pm
@@ -23,9 +23,6 @@ else:
 
 if options.verbose is True:
     print sb.jitter.vm
-
-if options.address is None:
-    raise ValueError('Invalid address')
 
 # Run the code
 sb.run()

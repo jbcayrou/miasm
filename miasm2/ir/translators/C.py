@@ -1,5 +1,5 @@
 from miasm2.ir.translators.translator import Translator
-from miasm2.core import asmbloc
+from miasm2.core import asmblock
 from miasm2.expression.modint import size2mask
 
 
@@ -23,7 +23,7 @@ class TranslatorC(Translator):
 
 
     def from_ExprId(self, expr):
-        if isinstance(expr.name, asmbloc.asm_label):
+        if isinstance(expr.name, asmblock.AsmLabel):
             return "0x%x" % expr.name.offset
         return str(expr)
 
@@ -47,9 +47,12 @@ class TranslatorC(Translator):
                 return "parity(%s&0x%x)" % (self.from_expr(expr.args[0]),
                                             size2mask(expr.args[0].size))
             elif expr.op in ['bsr', 'bsf']:
-                return "x86_%s(%s, 0x%x)" % (expr.op,
-                                             self.from_expr(expr.args[0]),
-                                             expr.args[0].size)
+                return "x86_%s(0x%x, %s)" % (expr.op,
+                                             expr.args[0].size,
+                                             self.from_expr(expr.args[0]))
+            elif expr.op in ['clz']:
+                return "%s(%s)" % (expr.op,
+                                   self.from_expr(expr.args[0]))
             elif expr.op == '!':
                 return "(~ %s)&0x%x" % (self.from_expr(expr.args[0]),
                                         size2mask(expr.args[0].size))
@@ -142,11 +145,11 @@ class TranslatorC(Translator):
         out = []
         # XXX check mask for 64 bit & 32 bit compat
         dst_cast = "uint%d_t" % expr.size
-        for x in expr.args:
+        for index, arg in expr.iter_args():
             out.append("(((%s)(%s & 0x%X)) << %d)" % (dst_cast,
-                                                      self.from_expr(x[0]),
-                                                      (1 << (x[2] - x[1])) - 1,
-                                                      x[1]))
+                                                      self.from_expr(arg),
+                                                      (1 << arg.size) - 1,
+                                                      index))
         out = ' | '.join(out)
         return '(' + out + ')'
 

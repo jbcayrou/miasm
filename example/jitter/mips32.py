@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#! /usr/bin/env python2
 #-*- coding:utf-8 -*-
 from argparse import ArgumentParser
 from miasm2.analysis import debugging
@@ -20,8 +20,8 @@ parser.add_argument("-n", "--log-newbloc",
                     help="Log basic blocks processed by the Jitter",
                     action="store_true")
 parser.add_argument("-j", "--jitter",
-                    help="Jitter engine. Possible values are : tcc (default), llvm",
-                    default="tcc")
+                    help="Jitter engine (default is 'gcc')",
+                    default="gcc")
 parser.add_argument("-d", "--debugging",
                     help="Attach a CLI debugguer to the sandboxed programm",
                     action="store_true")

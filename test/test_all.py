@@ -1,3 +1,5 @@
+#! /usr/bin/env python2
+
 import argparse
 import time
 import os
@@ -14,8 +16,10 @@ TAGS = {"regression": "REGRESSION", # Regression tests
         "long": "LONG", # Very time consumming tests
         "llvm": "LLVM", # LLVM dependency is required
         "tcc": "TCC", # TCC dependency is required
+        "gcc": "GCC", # GCC based tests
         "z3": "Z3", # Z3 dependecy is needed
         "qemu": "QEMU", # QEMU tests (several tests)
+        "cparser": "CPARSER", # pycparser is needed
         }
 
 # Regression tests
@@ -48,12 +52,15 @@ testset += RegressionTest(["x86/arch.py"], base_dir="arch",
 class ArchUnitTest(RegressionTest):
     """Test against arch unit regression tests"""
 
-    jitter_engines = ["tcc", "llvm", "gcc"]
+    jitter_engines = ["tcc", "llvm", "gcc", "python"]
 
     def __init__(self, script, jitter ,*args, **kwargs):
         super(ArchUnitTest, self).__init__([script, jitter], *args, **kwargs)
 
-
+# script -> blacklisted jitter
+blacklist = {
+    "x86/unit/mn_float.py": ["python", "llvm"],
+}
 for script in ["x86/sem.py",
                "x86/unit/mn_strings.py",
                "x86/unit/mn_float.py",
@@ -71,6 +78,8 @@ for script in ["x86/sem.py",
                "x86/unit/mn_pextr.py",
                "x86/unit/mn_pmovmskb.py",
                "x86/unit/mn_pushpop.py",
+               "x86/unit/mn_seh.py",
+               "x86/unit/mn_cpuid.py",
                "arm/arch.py",
                "arm/sem.py",
                "aarch64/unit/mn_ubfm.py",
@@ -82,6 +91,8 @@ for script in ["x86/sem.py",
                "mips32/unit/mn_bcc.py",
                ]:
     for jitter in ArchUnitTest.jitter_engines:
+        if jitter in blacklist.get(script, []):
+            continue
         tags = [TAGS[jitter]] if jitter in TAGS else []
         testset += ArchUnitTest(script, jitter, base_dir="arch", tags=tags)
 
@@ -199,7 +210,7 @@ class SemanticTestExec(RegressionTest):
                              input_filename,
                              "-a", hex(address)]
         self.products = []
-        self.tags.append(TAGS["tcc"])
+        self.tags.append(TAGS["gcc"])
 
 
 test_x86_64_mul_div = SemanticTestAsm("x86_64", "PE", ["mul_div"])
@@ -220,7 +231,7 @@ for script in ["interval.py",
                "test_types.py",
                ]:
     testset += RegressionTest([script], base_dir="core")
-testset += RegressionTest(["asmbloc.py"], base_dir="core",
+testset += RegressionTest(["asmblock.py"], base_dir="core",
                           products=["graph.dot", "graph2.dot",
                                     "graph3.dot", "graph4.dot"])
 ## Expression
@@ -229,18 +240,16 @@ for script in ["modint.py",
                "stp.py",
                "simplifications.py",
                "expression_helper.py",
+               "expr_pickle.py",
                ]:
     testset += RegressionTest([script], base_dir="expression")
+
 ## IR
-for script in ["ir2C.py",
-               "symbexec.py",
+for script in ["symbexec.py",
+               "ir.py",
                ]:
     testset += RegressionTest([script], base_dir="ir")
-testset += RegressionTest(["analysis.py"], base_dir="ir",
-                          products=[fname for fnames in (
-            ["simp_graph_%02d.dot" % test_nb, "graph_%02d.dot" % test_nb]
-            for test_nb in xrange(1, 18))
-                                    for fname in fnames])
+
 testset += RegressionTest(["z3_ir.py"], base_dir="ir/translators",
                           tags=[TAGS["z3"]])
 testset += RegressionTest(["smt2.py"], base_dir="ir/translators",
@@ -248,25 +257,42 @@ testset += RegressionTest(["smt2.py"], base_dir="ir/translators",
 ## OS_DEP
 for script in ["win_api_x86_32.py",
                ]:
-    testset += RegressionTest([script], base_dir="os_dep", tags=[TAGS['tcc']])
+    testset += RegressionTest([script], base_dir="os_dep", tags=[TAGS['gcc']])
+
+for arch in ["x86_32", "x86_64", "arml", "aarch64l"]:
+    testset += RegressionTest(["test_env.py", arch, "test_env.%s" % arch, "-c",
+                               "arg1", "-c", "arg2", "--environment-vars",
+                               "TEST=TOTO", "--mimic-env"],
+                              base_dir="os_dep/linux", tags=[TAGS['gcc']])
 
 ## Analysis
 testset += RegressionTest(["depgraph.py"], base_dir="analysis",
                           products=[fname for fnames in (
                               ["graph_test_%02d_00.dot" % test_nb,
-                               "exp_graph_test_%02d_00.dot" % test_nb,
                                "graph_%02d.dot" % test_nb]
                               for test_nb in xrange(1, 18))
                                     for fname in fnames] +
-                          [fname for fnames in (
-                              ["graph_test_%02d_%02d.dot" % (test_nb, res_nb),
-                               "exp_graph_test_%02d_%02d.dot" % (test_nb,
-                                                                 res_nb)]
-                              for (test_nb, res_nb) in ((3, 1), (5, 1), (8, 1),
-                                                        (9, 1), (10, 1),
-                                                        (12, 1), (13, 1),
-                                                        (14, 1), (15, 1)))
-                           for fname in fnames])
+                          ["graph_test_%02d_%02d.dot" % (test_nb, res_nb)
+                           for (test_nb, res_nb) in ((3, 1), (5, 1), (8, 1),
+                                                     (9, 1), (10, 1),
+                                                     (12, 1), (13, 1),
+                                                     (14, 1), (15, 1))
+                           ])
+testset += RegressionTest(["modularintervals.py"], base_dir="analysis")
+for jitter in ArchUnitTest.jitter_engines:
+    if jitter in blacklist.get(script, []):
+        continue
+    tags = [TAGS[jitter]] if jitter in TAGS else []
+    testset += RegressionTest(["dse.py", jitter], base_dir="analysis", tags=tags)
+
+testset += RegressionTest(["range.py"], base_dir="analysis",
+                          tags=[TAGS["z3"]])
+
+testset += RegressionTest(["data_flow.py"], base_dir="analysis",
+                          products=[fname for fnames in (
+            ["simp_graph_%02d.dot" % test_nb, "graph_%02d.dot" % test_nb]
+            for test_nb in xrange(1, 18))
+                                    for fname in fnames])
 
 ## Degraph
 class TestDepgraph(RegressionTest):
@@ -311,6 +337,7 @@ test_args = [(0x401000, 0x40100d, ["EAX"]),
              (0x401000, 0x401012, ["ECX"]),
              (0x401000, 0x40101f, ["EAX", "EBX"]),
              (0x401000, 0x401025, ["EAX", "EBX"]),
+             (0x401000, 0x401007, ["EBX"]),
 ]
 for i, test_args in enumerate(test_args):
     test_dg = SemanticTestAsm("x86_32", "PE", ["dg_test_%.2d" % i])
@@ -320,8 +347,13 @@ for i, test_args in enumerate(test_args):
 
 ## Jitter
 for script in ["jitload.py",
+               "vm_mngr.py",
+               "jit_options.py",
+               "test_post_instr.py",
                ]:
-    testset += RegressionTest([script], base_dir="jitter", tags=[TAGS["tcc"]])
+    for engine in ArchUnitTest.jitter_engines:
+        testset += RegressionTest([script, engine], base_dir="jitter",
+                                  tags=[TAGS.get(engine,None)])
 
 
 # Examples
@@ -399,6 +431,11 @@ test_mips32l = ExampleShellcode(["mips32l", "mips32.S", "mips32_sc_l.bin"])
 test_x86_64 = ExampleShellcode(["x86_64", "x86_64.S", "demo_x86_64.bin",
                                 "--PE"])
 test_x86_32_if_reg = ExampleShellcode(['x86_32', 'x86_32_if_reg.S', "x86_32_if_reg.bin"])
+test_x86_32_seh = ExampleShellcode(["x86_32", "x86_32_seh.S", "x86_32_seh.bin",
+                                    "--PE"])
+test_x86_32_dead = ExampleShellcode(['x86_32', 'x86_32_dead.S', "x86_32_dead.bin"])
+
+test_human = ExampleShellcode(["x86_64", "human.S", "human.bin"])
 
 testset += test_armb
 testset += test_arml
@@ -413,6 +450,9 @@ testset += test_mips32b
 testset += test_mips32l
 testset += test_x86_64
 testset += test_x86_32_if_reg
+testset += test_x86_32_seh
+testset += test_x86_32_dead
+testset += test_human
 
 class ExampleDisassembler(Example):
     """Disassembler examples specificities:
@@ -442,9 +482,9 @@ class ExampleDisasmFull(ExampleDisassembler):
 
     def __init__(self, *args, **kwargs):
         super(ExampleDisasmFull, self).__init__(*args, **kwargs)
-        self.command_line = ["full.py", "-g", "-s", "-m"] + self.command_line
-        self.products += ["graph_execflow.dot", "graph_irflow.dot",
-                          "graph_irflow_raw.dot", "lines.dot"]
+        self.command_line = ["full.py", "-g", "-ss", "-d", "-m"] + self.command_line
+        self.products += ["graph_defuse.dot", "graph_execflow.dot",
+                          "graph_irflow.dot", "graph_irflow_raw.dot", "lines.dot", "graph_irflow_reduced.dot"]
 
 
 testset += ExampleDisasmFull(["arml", Example.get_sample("demo_arm_l.bin"),
@@ -481,6 +521,8 @@ testset += ExampleDisasmFull(["x86_32", os.path.join("..", "..", "test",
                                                      "arch", "x86", "qemu",
                                                      "test-i386"),
                               "func_iret"])
+testset += ExampleDisasmFull(["x86_32", Example.get_sample("x86_32_dead.bin"),
+                              "0"], depends=[test_x86_32_dead])
 
 
 ## Expression
@@ -504,6 +546,14 @@ testset += ExampleExpression(["solve_condition_stp.py",
                               Example.get_sample("simple_test.bin")],
                              products=["graph_instr.dot", "out.dot"])
 
+testset += ExampleExpression(["access_c.py", Example.get_sample("human.bin")],
+                             depends=[test_human],
+                             products=["graph_irflow.dot"],
+                             tags=[TAGS["cparser"]])
+
+testset += ExampleExpression(["expr_c.py"],
+                             tags=[TAGS["cparser"]])
+
 for script in [["basic_op.py"],
                ["basic_simplification.py"],
                ["simplification_tools.py"],
@@ -511,6 +561,7 @@ for script in [["basic_op.py"],
                ["simplification_add.py"],
                ["expr_random.py"],
                ["expr_translate.py"],
+               ["expr_reduce.py"],
                ]:
     testset += ExampleExpression(script)
 
@@ -545,6 +596,17 @@ for options, nb_sol, tag in [([], 4, []),
                                  depends=[test_x86_32_if_reg],
                                  tags=tag)
 
+dse_crackme_out = Example.get_sample("dse_crackme.c")[:-2]
+dse_crackme = ExampleSymbolExec([Example.get_sample("dse_crackme.c"),
+                                 "-o", dse_crackme_out],
+                                products=[dse_crackme_out],
+                                executable="cc")
+testset += dse_crackme
+testset += ExampleSymbolExec(["dse_crackme.py", dse_crackme_out],
+                             depends=[dse_crackme],
+                             products=["test.txt"],
+                             tags=[TAGS["z3"]])
+
 ## Jitter
 class ExampleJitter(Example):
     """Jitter examples specificities:
@@ -554,11 +616,20 @@ class ExampleJitter(Example):
     jitter_engines = ["tcc", "llvm", "python", "gcc"]
 
 
+class ExampleJitterNoPython(ExampleJitter):
+    """Jitter examples specificities:
+    - script path begins with "jitter/"
+    Run jitting script without python support
+    """
+    jitter_engines = ["tcc", "llvm", "gcc"]
+
+
 for jitter in ExampleJitter.jitter_engines:
     # Take 5 min on a Core i5
     tags = {"python": [TAGS["long"]],
             "llvm": [TAGS["llvm"]],
             "tcc": [TAGS["tcc"]],
+            "gcc": [TAGS["gcc"]],
             }
     testset += ExampleJitter(["unpack_upx.py",
                               Example.get_sample("box_upx.exe")] +
@@ -567,9 +638,10 @@ for jitter in ExampleJitter.jitter_engines:
                              tags=tags.get(jitter, []))
 
 for script, dep in [(["x86_32.py", Example.get_sample("x86_32_sc.bin")], []),
-                    (["arm.py", Example.get_sample("md5_arm"), "-a", "A684"],
+                    (["arm.py", Example.get_sample("md5_arm"), "--mimic-env"],
                      []),
-                    (["sandbox_elf_aarch64l.py", Example.get_sample("md5_aarch64l"), "-a", "0x400A00"],
+                    (["sandbox_elf_aarch64l.py",
+                      Example.get_sample("md5_aarch64l"), "--mimic-env"],
                      []),
                     (["msp430.py", Example.get_sample("msp430_sc.bin"), "0"],
                      [test_msp430]),
@@ -579,6 +651,7 @@ for script, dep in [(["x86_32.py", Example.get_sample("x86_32_sc.bin")], []),
                       "b", "-a", "0"], [test_armb]),
                     (["arm_sc.py", "0", Example.get_sample("demo_arm_l.bin"),
                       "l", "-a", "0"], [test_arml]),
+                    (["sandbox_call.py", Example.get_sample("md5_arm")], []),
                     ] + [(["sandbox_pe_x86_32.py",
                            Example.get_sample("x86_32_" + name + ".bin")],
                           [test_box[name]])
@@ -588,7 +661,16 @@ for script, dep in [(["x86_32.py", Example.get_sample("x86_32_sc.bin")], []),
         testset += ExampleJitter(script + ["--jitter", jitter], depends=dep,
                                  tags=tags)
 
+
+for jitter in ExampleJitterNoPython.jitter_engines:
+    tags = [TAGS[jitter]] if jitter in TAGS else []
+    testset += ExampleJitterNoPython(["test_x86_32_seh.py", Example.get_sample("x86_32_seh.bin")] + ["--jitter", jitter],
+                                     depends=[test_x86_32_seh],
+                                     tags=tags)
+
 testset += ExampleJitter(["example_types.py"])
+testset += ExampleJitter(["trace.py", Example.get_sample("md5_arm"), "-a",
+                          "0xA684"])
 
 
 if __name__ == "__main__":
@@ -601,6 +683,9 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--omit-tags", help="Omit tests based on tags \
 (tag1,tag2). Available tags are %s. \
 By default, no tag is omitted." % ", ".join(TAGS.keys()), default="")
+    parser.add_argument("-o", "--only-tags", help="Restrict to tests based on tags \
+(tag1,tag2). Available tags are %s. \
+By default, all tag are considered." % ", ".join(TAGS.keys()), default="")
     parser.add_argument("-n", "--do-not-clean",
                         help="Do not clean tests products", action="store_true")
     args = parser.parse_args()
@@ -610,16 +695,23 @@ By default, no tag is omitted." % ", ".join(TAGS.keys()), default="")
     if args.mono is True or args.coverage is True:
         multiproc = False
 
-    ## Parse omit-tags argument
+    ## Parse omit-tags and only-tags argument
     exclude_tags = []
-    for tag in args.omit_tags.split(","):
-        if not tag:
-            continue
-        if tag not in TAGS:
-            print "%(red)s[TAG]%(end)s" % cosmetics.colors, \
-                "Unkown tag '%s'" % tag
-            exit(-1)
-        exclude_tags.append(TAGS[tag])
+    include_tags = []
+    for dest, src in ((exclude_tags, args.omit_tags),
+                      (include_tags, args.only_tags)):
+        for tag in src.split(","):
+            if not tag:
+                continue
+            if tag not in TAGS:
+                print "%(red)s[TAG]%(end)s" % cosmetics.colors, \
+                    "Unkown tag '%s'" % tag
+                exit(-1)
+            dest.append(TAGS[tag])
+
+    if exclude_tags and include_tags:
+        print "%(red)s[TAG]%(end)s" % cosmetics.colors, \
+                "Omit and Only used together: whitelist mode"
 
     # Handle coverage
     coveragerc = None
@@ -663,7 +755,7 @@ By default, no tag is omitted." % ", ".join(TAGS.keys()), default="")
     # Handle llvm modularity
     llvm = True
     try:
-        import llvm
+        import llvmlite
     except ImportError:
         llvm = False
 
@@ -674,12 +766,9 @@ By default, no tag is omitted." % ", ".join(TAGS.keys()), default="")
     except ImportError:
         tcc = False
 
-    # TODO XXX: fix llvm jitter (deactivated for the moment)
-    llvm = False
-
     if llvm is False:
         print "%(red)s[LLVM]%(end)s Python" % cosmetics.colors + \
-            "'py-llvm 3.2' module is required for llvm tests"
+            "'llvmlite' module is required for llvm tests"
 
         # Remove llvm tests
         if TAGS["llvm"] not in exclude_tags:
@@ -701,6 +790,16 @@ By default, no tag is omitted." % ", ".join(TAGS.keys()), default="")
             "Z3 and its python binding are necessary for TranslatorZ3."
         if TAGS["z3"] not in exclude_tags:
             exclude_tags.append(TAGS["z3"])
+
+    # Handle pycparser dependency
+    try:
+        import pycparser
+    except ImportError:
+        print "%(red)s[PYCPARSER]%(end)s " % cosmetics.colors + \
+            "pycparser are necessary for Objc."
+        if TAGS["cparser"] not in exclude_tags:
+            exclude_tags.append(TAGS["cparser"])
+
     test_ko = []
     test_ok = []
 
@@ -712,7 +811,7 @@ By default, no tag is omitted." % ", ".join(TAGS.keys()), default="")
 
 
     # Filter testset according to tags
-    testset.filter_tags(exclude_tags=exclude_tags)
+    testset.filter_tags(exclude_tags=exclude_tags, include_tags=include_tags)
 
     # Run tests
     testset.run()

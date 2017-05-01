@@ -1,11 +1,11 @@
 #include <Python.h>
-#include "../JitCore.h"
 #include "structmember.h"
 #include <stdint.h>
 #include <inttypes.h>
 #include "../queue.h"
 #include "../vm_mngr.h"
 #include "../vm_mngr_py.h"
+#include "../JitCore.h"
 #include "JitCore_mips32.h"
 
 
@@ -109,7 +109,7 @@ PyObject* cpu_set_gpreg(JitCpu* self, PyObject *args)
     unsigned int i, found;
 
     if (!PyArg_ParseTuple(args, "O", &dict))
-	    return NULL;
+	    RAISE(PyExc_TypeError,"Cannot parse arguments");
     if(!PyDict_Check(dict))
 	    RAISE(PyExc_TypeError, "arg must be dict");
     while(PyDict_Next(dict, &pos, &d_key, &d_value)){
@@ -190,7 +190,7 @@ PyObject* cpu_set_exception(JitCpu* self, PyObject* args)
 	uint64_t i;
 
 	if (!PyArg_ParseTuple(args, "O", &item1))
-		return NULL;
+		RAISE(PyExc_TypeError,"Cannot parse arguments");
 
 	PyGetInt(item1, i);
 
@@ -254,10 +254,10 @@ PyObject* vm_set_mem(JitCpu *self, PyObject* args)
        char * buffer;
        uint64_t size;
        uint64_t addr;
-       int ret = 0x1337;
+       int ret;
 
        if (!PyArg_ParseTuple(args, "OO", &py_addr, &py_buffer))
-	       return NULL;
+	       RAISE(PyExc_TypeError,"Cannot parse arguments");
 
        PyGetInt(py_addr, addr);
 
@@ -356,7 +356,6 @@ PyObject* get_gpreg_offset_all(void)
     PyObject *o;
 
     get_reg_off(exception_flags);
-    get_reg_off(exception_flags_new);
 
 
     get_reg_off(ZERO);
@@ -395,132 +394,6 @@ PyObject* get_gpreg_offset_all(void)
     get_reg_off(PC_FETCH);
     get_reg_off(R_LO);
     get_reg_off(R_HI);
-
-    get_reg_off(ZERO_new);
-    get_reg_off(AT_new);
-    get_reg_off(V0_new);
-    get_reg_off(V1_new);
-    get_reg_off(A0_new);
-    get_reg_off(A1_new);
-    get_reg_off(A2_new);
-    get_reg_off(A3_new);
-    get_reg_off(T0_new);
-    get_reg_off(T1_new);
-    get_reg_off(T2_new);
-    get_reg_off(T3_new);
-    get_reg_off(T4_new);
-    get_reg_off(T5_new);
-    get_reg_off(T6_new);
-    get_reg_off(T7_new);
-    get_reg_off(S0_new);
-    get_reg_off(S1_new);
-    get_reg_off(S2_new);
-    get_reg_off(S3_new);
-    get_reg_off(S4_new);
-    get_reg_off(S5_new);
-    get_reg_off(S6_new);
-    get_reg_off(S7_new);
-    get_reg_off(T8_new);
-    get_reg_off(T9_new);
-    get_reg_off(K0_new);
-    get_reg_off(K1_new);
-    get_reg_off(GP_new);
-    get_reg_off(SP_new);
-    get_reg_off(FP_new);
-    get_reg_off(RA_new);
-    get_reg_off(PC_new);
-    get_reg_off(PC_FETCH_new);
-    get_reg_off(R_LO_new);
-    get_reg_off(R_HI_new);
-
-
-
-    get_reg_off(pfmem08_0);
-    get_reg_off(pfmem08_1);
-    get_reg_off(pfmem08_2);
-    get_reg_off(pfmem08_3);
-    get_reg_off(pfmem08_4);
-    get_reg_off(pfmem08_5);
-    get_reg_off(pfmem08_6);
-    get_reg_off(pfmem08_7);
-    get_reg_off(pfmem08_8);
-    get_reg_off(pfmem08_9);
-    get_reg_off(pfmem08_10);
-    get_reg_off(pfmem08_11);
-    get_reg_off(pfmem08_12);
-    get_reg_off(pfmem08_13);
-    get_reg_off(pfmem08_14);
-    get_reg_off(pfmem08_15);
-    get_reg_off(pfmem08_16);
-    get_reg_off(pfmem08_17);
-    get_reg_off(pfmem08_18);
-    get_reg_off(pfmem08_19);
-
-
-    get_reg_off(pfmem16_0);
-    get_reg_off(pfmem16_1);
-    get_reg_off(pfmem16_2);
-    get_reg_off(pfmem16_3);
-    get_reg_off(pfmem16_4);
-    get_reg_off(pfmem16_5);
-    get_reg_off(pfmem16_6);
-    get_reg_off(pfmem16_7);
-    get_reg_off(pfmem16_8);
-    get_reg_off(pfmem16_9);
-    get_reg_off(pfmem16_10);
-    get_reg_off(pfmem16_11);
-    get_reg_off(pfmem16_12);
-    get_reg_off(pfmem16_13);
-    get_reg_off(pfmem16_14);
-    get_reg_off(pfmem16_15);
-    get_reg_off(pfmem16_16);
-    get_reg_off(pfmem16_17);
-    get_reg_off(pfmem16_18);
-    get_reg_off(pfmem16_19);
-
-
-    get_reg_off(pfmem32_0);
-    get_reg_off(pfmem32_1);
-    get_reg_off(pfmem32_2);
-    get_reg_off(pfmem32_3);
-    get_reg_off(pfmem32_4);
-    get_reg_off(pfmem32_5);
-    get_reg_off(pfmem32_6);
-    get_reg_off(pfmem32_7);
-    get_reg_off(pfmem32_8);
-    get_reg_off(pfmem32_9);
-    get_reg_off(pfmem32_10);
-    get_reg_off(pfmem32_11);
-    get_reg_off(pfmem32_12);
-    get_reg_off(pfmem32_13);
-    get_reg_off(pfmem32_14);
-    get_reg_off(pfmem32_15);
-    get_reg_off(pfmem32_16);
-    get_reg_off(pfmem32_17);
-    get_reg_off(pfmem32_18);
-    get_reg_off(pfmem32_19);
-
-
-    get_reg_off(pfmem64_0);
-    get_reg_off(pfmem64_1);
-    get_reg_off(pfmem64_2);
-    get_reg_off(pfmem64_3);
-    get_reg_off(pfmem64_4);
-    get_reg_off(pfmem64_5);
-    get_reg_off(pfmem64_6);
-    get_reg_off(pfmem64_7);
-    get_reg_off(pfmem64_8);
-    get_reg_off(pfmem64_9);
-    get_reg_off(pfmem64_10);
-    get_reg_off(pfmem64_11);
-    get_reg_off(pfmem64_12);
-    get_reg_off(pfmem64_13);
-    get_reg_off(pfmem64_14);
-    get_reg_off(pfmem64_15);
-    get_reg_off(pfmem64_16);
-    get_reg_off(pfmem64_17);
-    get_reg_off(pfmem64_18);
-    get_reg_off(pfmem64_19);
 
     return dict;
 }

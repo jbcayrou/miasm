@@ -424,10 +424,10 @@ How does it work?
 Miasm embeds its own disassembler, intermediate language and
 instruction semantic. It is written in Python.
 
-To emulate code, it uses LibTCC, LLVM, GCC or Python to JIT the intermediate
-representation. It can emulate shellcodes and all or parts of binaries. Python
-callbacks can be executed to interact with the execution, for instance to
-emulate library functions effects.
+To emulate code, it uses LibTCC, LLVM, GCC, Clang or Python to JIT the
+intermediate representation. It can emulate shellcodes and all or parts of
+binaries. Python callbacks can be executed to interact with the execution, for
+instance to emulate library functions effects.
 
 Documentation
 =============
@@ -450,11 +450,16 @@ Miasm uses:
 * python-pyparsing
 * python-dev
 * elfesteem from [Elfesteem](https://github.com/serpilliere/elfesteem.git)
+* optionally python-pycparser
 
 To enable code JIT, one of the following module is mandatory:
 * GCC
-* LLVM v3.2 with python-llvm, see below
+* Clang
+* LLVM with Numba llvmlite, see below
 * LibTCC [tinycc (ONLY version 0.9.26)](http://repo.or.cz/w/tinycc.git)
+
+'optional' Miasm can also use:
+* Z3, the [Theorem Prover](https://github.com/Z3Prover/z3)
 
 Configuration
 -------------
@@ -469,6 +474,7 @@ sudo python setup.py install
 
 To use the jitter, GCC, TCC or LLVM is recommended
 * GCC (any version)
+* Clang (any version)
 * LibTCC needs to be configured with the `--disable-static` option
   * remove `libtcc-dev` from the system to avoid conflicts
   * clone [TinyCC](http://repo.or.cz/tinycc.git): `git clone http://repo.or.cz/tinycc.git`
@@ -478,9 +484,9 @@ To use the jitter, GCC, TCC or LLVM is recommended
   * `sudo make install`
   * There may be an error on documentation generation
 * LLVM
-  * Debian (testing/unstable): install python-llvm
-  * Debian stable/Ubuntu/Kali/whatever: install from [llvmpy](http://www.llvmpy.org/)
-  * Windows: python-llvm is not supported :/
+  * Debian (testing/unstable): Not tested
+  * Debian stable/Ubuntu/Kali/whatever: `pip install llvmlite` or install from [llvmlite](https://github.com/numba/llvmlite)
+  * Windows: Not tested
 * Build and install Miasm:
 ```
 $ cd miasm_directory
@@ -520,7 +526,31 @@ Some options can be specified:
 
 They already use Miasm
 ======================
-* [Sibyl](https://github.com/cea-sec/Sibyl): A function divination tool
+
+Tools
+-----
+
+* [Sibyl](https://github.com/cea-sec/Sibyl): A function divination too
+* [R2M2](https://github.com/guedou/r2m2): Use miasm2 as a radare2 plugin
+* [CGrex](https://github.com/mechaphish/cgrex) : Targeted patcher for CGC binaries
+* [ethRE](https://github.com/jbcayrou/ethRE) Reversing tool for Ethereum EVM (with corresponding Miasm2 architecture)
+
+Blog posts / papers / conferences
+---------------------------------
+
+* [Deobfuscation: recovering an OLLVM-protected program](http://blog.quarkslab.com/deobfuscation-recovering-an-ollvm-protected-program.html)
+* [Taming a Wild Nanomite-protected MIPS Binary With Symbolic Execution: No Such Crackme](https://doar-e.github.io/blog/2014/10/11/taiming-a-wild-nanomite-protected-mips-binary-with-symbolic-execution-no-such-crackme/)
+* [Génération rapide de DGA avec Miasm](https://www.lexsi.com/securityhub/generation-rapide-de-dga-avec-miasm/): Quick computation of DGA (French article)
+* [Enabling Client-Side Crash-Resistance to Overcome Diversification and Information Hiding](https://www.internetsociety.org/sites/default/files/blogs-media/enabling-client-side-crash-resistance-overcome-diversification-information-hiding.pdf): Detect undirected call potential arguments
+* [Miasm: Framework de reverse engineering](https://www.sstic.org/2012/presentation/miasm_framework_de_reverse_engineering/) (French)
+* [Tutorial miasm](https://www.sstic.org/2014/presentation/Tutorial_miasm/) (French video)
+* [Graphes de dépendances : Petit Poucet style](https://www.sstic.org/2016/presentation/graphes_de_dpendances__petit_poucet_style/): DepGraph (French)
+
+Books
+-----
+
+* [Practical Reverse Engineering: X86, X64, Arm, Windows Kernel, Reversing Tools, and Obfuscation](http://eu.wiley.com/WileyCDA/WileyTitle/productCd-1118787315,subjectCd-CSJ0.html): Introduction to Miasm (Chapter 5 "Obfuscation")
+* [BlackHat Python - Appendix](https://github.com/oreilly-japan/black-hat-python-jp-support/tree/master/appendix-A): Japan security book's samples
 
 
 Misc

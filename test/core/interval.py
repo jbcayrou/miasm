@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#! /usr/bin/env python2
 #-*- coding:utf-8 -*-
 
 from miasm2.core.interval import *
@@ -89,6 +89,10 @@ assert(i6 & i6 == i6)
 assert(i14 & i15 == i14)
 assert(i15 & i14 == i14)
 assert(i14 & i16 == interval([(3, 5), (7, 8)]))
+
+assert(i5.length == 5)
+assert(i6.length == 7)
+assert((i1 - i1).length == 0)
 
 x1 = [(7, 87), (76, 143), (94, 129), (79, 89), (46, 100)]
 assert(interval(x1) == interval([(7, 143)]))

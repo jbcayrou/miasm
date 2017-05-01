@@ -1,10 +1,11 @@
 from miasm2.expression.expression import *
-from miasm2.ir.ir import ir, irbloc
+from miasm2.ir.ir import IntermediateRepresentation, IRBlock
 from miasm2.arch.arm.arch import mn_arm, mn_armt
 from miasm2.arch.arm.regs import *
 
 
 # liris.cnrs.fr/~mmrissa/lib/exe/fetch.php?media=armv7-a-r-manual.pdf
+EXCEPT_SOFT_BP = (1 << 1)
 
 EXCEPT_PRIV_INSN = (1 << 17)
 
@@ -12,7 +13,7 @@ EXCEPT_PRIV_INSN = (1 << 17)
 
 
 def update_flag_zf(a):
-    return [ExprAff(zf, ExprCond(a, ExprInt1(0), ExprInt1(1)))]
+    return [ExprAff(zf, ExprCond(a, ExprInt(0, 1), ExprInt(1, 1)))]
 
 
 def update_flag_nf(a):
@@ -30,7 +31,7 @@ def update_flag_logic(a):
     e = []
     e += update_flag_zn(a)
     # XXX TODO: set cf if ROT imm in argument
-    #e.append(ExprAff(cf, ExprInt1(0)))
+    #e.append(ExprAff(cf, ExprInt(0, 1)))
     return e
 
 
@@ -67,7 +68,7 @@ def update_flag_add_of(op1, op2, res):
 def update_flag_sub_cf(op1, op2, res):
     "Compote CF in @res = @op1 - @op2"
     return ExprAff(cf,
-        ((((op1 ^ op2) ^ res) ^ ((op1 ^ res) & (op1 ^ op2))).msb()) ^ ExprInt1(1))
+        ((((op1 ^ op2) ^ res) ^ ((op1 ^ res) & (op1 ^ op2))).msb()) ^ ExprInt(1, 1))
 
 
 def update_flag_sub_of(op1, op2, res):
@@ -226,7 +227,7 @@ def sbc(ir, instr, a, b, c=None):
     e = []
     if c is None:
         b, c = a, b
-    r = (b + cf.zeroExtend(32)) - (c + ExprInt32(1))
+    r = (b + cf.zeroExtend(32)) - (c + ExprInt(1, 32))
     e.append(ExprAff(a, r))
     dst = get_dst(a)
     if dst is not None:
@@ -238,7 +239,7 @@ def sbcs(ir, instr, a, b, c=None):
     e = []
     if c is None:
         b, c = a, b
-    r = (b + cf.zeroExtend(32)) - (c + ExprInt32(1))
+    r = (b + cf.zeroExtend(32)) - (c + ExprInt(1, 32))
     e += update_flag_arith(r)
     e += update_flag_sub(b, c, r)
     e.append(ExprAff(a, r))
@@ -252,7 +253,7 @@ def rsc(ir, instr, a, b, c=None):
     e = []
     if c is None:
         b, c = a, b
-    r = (c + cf.zeroExtend(32)) - (b + ExprInt32(1))
+    r = (c + cf.zeroExtend(32)) - (b + ExprInt(1, 32))
     e.append(ExprAff(a, r))
     dst = get_dst(a)
     if dst is not None:
@@ -264,7 +265,7 @@ def rscs(ir, instr, a, b, c=None):
     e = []
     if c is None:
         b, c = a, b
-    r = (c + cf.zeroExtend(32)) - (b + ExprInt32(1))
+    r = (c + cf.zeroExtend(32)) - (b + ExprInt(1, 32))
     e.append(ExprAff(a, r))
     e += update_flag_arith(r)
     e += update_flag_sub(c, b, r)
@@ -347,7 +348,7 @@ def mov(ir, instr, a, b):
 
 
 def movt(ir, instr, a, b):
-    r = a | b << ExprInt32(16)
+    r = a | b << ExprInt(16, 32)
     e = [ExprAff(a, r)]
     dst = get_dst(a)
     if dst is not None:
@@ -367,7 +368,7 @@ def movs(ir, instr, a, b):
 
 
 def mvn(ir, instr, a, b):
-    r = b ^ ExprInt32(-1)
+    r = b ^ ExprInt(-1, 32)
     e = [ExprAff(a, r)]
     dst = get_dst(a)
     if dst is not None:
@@ -377,7 +378,7 @@ def mvn(ir, instr, a, b):
 
 def mvns(ir, instr, a, b):
     e = []
-    r = b ^ ExprInt32(-1)
+    r = b ^ ExprInt(-1, 32)
     e.append(ExprAff(a, r))
     # XXX TODO check
     e += update_flag_logic(r)
@@ -397,14 +398,14 @@ def neg(ir, instr, a, b):
     return e
 
 def negs(ir, instr, a, b):
-    e = subs(ir, instr, a, ExprInt_from(b, 0), b)
+    e = subs(ir, instr, a, ExprInt(0, b.size), b)
     return e
 
 def bic(ir, instr, a, b, c=None):
     e = []
     if c is None:
         b, c = a, b
-    r = b & (c ^ ExprInt(uint32(-1)))
+    r = b & (c ^ ExprInt(-1, 32))
     e.append(ExprAff(a, r))
     dst = get_dst(a)
     if dst is not None:
@@ -416,7 +417,7 @@ def bics(ir, instr, a, b, c=None):
     e = []
     if c is None:
         b, c = a, b
-    r = b & (c ^ ExprInt(uint32(-1)))
+    r = b & (c ^ ExprInt(-1, 32))
     e += update_flag_logic(r)
     e.append(ExprAff(a, r))
     dst = get_dst(a)
@@ -480,7 +481,7 @@ def umull(ir, instr, a, b, c, d):
 
 def umlal(ir, instr, a, b, c, d):
     e = []
-    r = c.zeroExtend(64) * d.zeroExtend(64) + ExprCompose([(a, 0, 32), (b, 32, 64)])
+    r = c.zeroExtend(64) * d.zeroExtend(64) + ExprCompose(a, b)
     e.append(ExprAff(a, r[0:32]))
     e.append(ExprAff(b, r[32:64]))
     # r15/IRDst not allowed as output
@@ -496,7 +497,7 @@ def smull(ir, instr, a, b, c, d):
 
 def smlal(ir, instr, a, b, c, d):
     e = []
-    r = c.signExtend(64) * d.signExtend(64) + ExprCompose([(a, 0, 32), (b, 32, 64)])
+    r = c.signExtend(64) * d.signExtend(64) + ExprCompose(a, b)
     e.append(ExprAff(a, r[0:32]))
     e.append(ExprAff(b, r[32:64]))
     # r15/IRDst not allowed as output
@@ -511,7 +512,7 @@ def b(ir, instr, a):
 
 def bl(ir, instr, a):
     e = []
-    l = ExprInt32(instr.offset + instr.l)
+    l = ExprInt(instr.offset + instr.l, 32)
     e.append(ExprAff(PC, a))
     e.append(ExprAff(ir.IRDst, a))
     e.append(ExprAff(LR, l))
@@ -527,7 +528,7 @@ def bx(ir, instr, a):
 
 def blx(ir, instr, a):
     e = []
-    l = ExprInt32(instr.offset + instr.l)
+    l = ExprInt(instr.offset + instr.l, 32)
     e.append(ExprAff(PC, a))
     e.append(ExprAff(ir.IRDst, a))
     e.append(ExprAff(LR, l))
@@ -548,9 +549,9 @@ def st_ld_r(ir, instr, a, b, store=False, size=32, s_ext=False, z_ext=False):
             postinc = True
     if isinstance(b, ExprOp) and b.op in ["postinc", 'preinc']:
         # XXX TODO CHECK
-        base, off = b.args[0],  b.args[1]  # ExprInt32(size/8)
+        base, off = b.args[0],  b.args[1]  # ExprInt(size/8, 32)
     else:
-        base, off = b, ExprInt32(0)
+        base, off = b, ExprInt(0, 32)
     # print a, wb, base, off, postinc
     if postinc:
         ad = base
@@ -583,14 +584,14 @@ def st_ld_r(ir, instr, a, b, store=False, size=32, s_ext=False, z_ext=False):
     if store:
         e.append(ExprAff(m, a))
         if dmem:
-            e.append(ExprAff(ExprMem(ad + ExprInt32(4), size=size), a2))
+            e.append(ExprAff(ExprMem(ad + ExprInt(4, 32), size=size), a2))
     else:
         if a == PC:
             dst = PC
             e.append(ExprAff(ir.IRDst, m))
         e.append(ExprAff(a, m))
         if dmem:
-            e.append(ExprAff(a2, ExprMem(ad + ExprInt32(4), size=size)))
+            e.append(ExprAff(a2, ExprMem(ad + ExprInt(4, 32), size=size)))
 
     # XXX TODO check multiple write cause by wb
     if wb or postinc:
@@ -667,9 +668,9 @@ def st_ld_m(ir, instr, a, b, store=False, postinc=False, updown=False):
     if postinc:
         pass
     else:
-        base += ExprInt32(step)
+        base += ExprInt(step, 32)
     for i, r in enumerate(regs):
-        ad = base + ExprInt32(i * step)
+        ad = base + ExprInt(i * step, 32)
         if store:
             e.append(ExprAff(ExprMem(ad), r))
         else:
@@ -679,9 +680,9 @@ def st_ld_m(ir, instr, a, b, store=False, postinc=False, updown=False):
     # XXX TODO check multiple write cause by wb
     if wb:
         if postinc:
-            e.append(ExprAff(a, base + ExprInt32(len(regs) * step)))
+            e.append(ExprAff(a, base + ExprInt(len(regs) * step, 32)))
         else:
-            e.append(ExprAff(a, base + ExprInt32((len(regs) - 1) * step)))
+            e.append(ExprAff(a, base + ExprInt((len(regs) - 1) * step, 32)))
     if store:
         pass
     else:
@@ -725,7 +726,7 @@ def stmdb(ir, instr, a, b):
 def svc(ir, instr, a):
     # XXX TODO implement
     e = [
-        ExprAff(exception_flags, ExprInt32(EXCEPT_PRIV_INSN))]
+        ExprAff(exception_flags, ExprInt(EXCEPT_PRIV_INSN, 32))]
     return e
 
 
@@ -811,9 +812,9 @@ def push(ir, instr, a):
     e = []
     regs = list(a.args)
     for i in xrange(len(regs)):
-        r = SP + ExprInt32(-4 * (i + 1))
+        r = SP + ExprInt(-4 * (i + 1), 32)
         e.append(ExprAff(ExprMem(r), regs[i]))
-    r = SP + ExprInt32(-4 * len(regs))
+    r = SP + ExprInt(-4 * len(regs), 32)
     e.append(ExprAff(SP, r))
     return e
 
@@ -823,11 +824,11 @@ def pop(ir, instr, a):
     regs = list(a.args)
     dst = None
     for i in xrange(len(regs)):
-        r = SP + ExprInt32(4 * i)
+        r = SP + ExprInt(4 * i, 32)
         e.append(ExprAff(regs[i], ExprMem(r)))
         if regs[i] == ir.pc:
             dst = ExprMem(r)
-    r = SP + ExprInt32(4 * len(regs))
+    r = SP + ExprInt(4 * len(regs), 32)
     e.append(ExprAff(SP, r))
     if dst is not None:
         e.append(ExprAff(ir.IRDst, dst))
@@ -892,8 +893,8 @@ def sxth(ir, instr, a, b):
 
 def ubfx(ir, instr, a, b, c, d):
     e = []
-    c = int(c.arg)
-    d = int(d.arg)
+    c = int(c)
+    d = int(d)
     r = b[c:c+d].zeroExtend(32)
     e.append(ExprAff(a, r))
     dst = None
@@ -904,19 +905,19 @@ def ubfx(ir, instr, a, b, c, d):
 
 def bfc(ir, instr, a, b, c):
     e = []
-    start = int(b.arg)
-    stop = start + int(c.arg)
+    start = int(b)
+    stop = start + int(c)
     out = []
     last = 0
     if start:
-        out.append((a[:start], 0, start))
+        out.append(a[:start])
         last = start
     if stop - start:
-        out.append((ExprInt32(0)[last:stop], last, stop))
+        out.append(ExprInt(0, 32)[last:stop])
         last = stop
     if last < 32:
-        out.append((a[last:], last, 32))
-    r = ExprCompose(out)
+        out.append(a[last:])
+    r = ExprCompose(*out)
     e.append(ExprAff(a, r))
     dst = None
     if PC in a.get_r():
@@ -926,10 +927,7 @@ def bfc(ir, instr, a, b, c):
 
 def rev(ir, instr, a, b):
     e = []
-    c = ExprCompose([(b[:8],      24, 32),
-                     (b[8:16],    16, 24),
-                     (b[16:24],   8, 16),
-                     (b[24:32],   0, 8)])
+    c = ExprCompose(b[24:32], b[16:24], b[8:16], b[:8])
     e.append(ExprAff(a, c))
     return e
 
@@ -937,6 +935,35 @@ def pld(ir, instr, a):
     return []
 
 
+def clz(ir, instr, a, b):
+    e = []
+    e.append(ExprAff(a, ExprOp('clz', b)))
+    return e
+
+def uxtab(ir, instr, a, b, c):
+    e = []
+    e.append(ExprAff(a, b + (c & ExprInt(0xff, 32))))
+    return e
+
+
+def bkpt(ir, instr, a):
+    e = []
+    e.append(ExprAff(exception_flags, ExprInt(EXCEPT_SOFT_BP, 32)))
+    e.append(ExprAff(bp_num, a))
+    return e
+
+def _extract_s16(arg, part):
+    if part == 'B': # bottom 16 bits
+        return arg[0:16]
+    elif part == 'T': # top 16 bits
+        return arg[16:32]
+
+def smul(ir, instr, a, b, c):
+    return [ExprAff(a, _extract_s16(b, instr.name[4]).signExtend(32) * _extract_s16(c, instr.name[5]).signExtend(32))]
+
+def smulw(ir, instr, a, b, c):
+    prod = b.signExtend(48) * _extract_s16(c, instr.name[5]).signExtend(48)
+    return [ExprAff(a, prod[16:48])] # signed most significant 32 bits of the 48-bit result
 
 COND_EQ = 0
 COND_NE = 1
@@ -976,26 +1003,26 @@ cond_dct = {
 
 
 tab_cond = {COND_EQ: zf,
-            COND_NE: ExprCond(zf, ExprInt1(0), ExprInt1(1)),
+            COND_NE: ExprCond(zf, ExprInt(0, 1), ExprInt(1, 1)),
             COND_CS: cf,
-            COND_CC: ExprCond(cf, ExprInt1(0), ExprInt1(1)),
+            COND_CC: ExprCond(cf, ExprInt(0, 1), ExprInt(1, 1)),
             COND_MI: nf,
-            COND_PL: ExprCond(nf, ExprInt1(0), ExprInt1(1)),
+            COND_PL: ExprCond(nf, ExprInt(0, 1), ExprInt(1, 1)),
             COND_VS: of,
-            COND_VC: ExprCond(of, ExprInt1(0), ExprInt1(1)),
-            COND_HI: cf & ExprCond(zf, ExprInt1(0), ExprInt1(1)),
+            COND_VC: ExprCond(of, ExprInt(0, 1), ExprInt(1, 1)),
+            COND_HI: cf & ExprCond(zf, ExprInt(0, 1), ExprInt(1, 1)),
             # COND_HI: cf,
             # COND_HI: ExprOp('==',
             #                ExprOp('|', cf, zf),
-            #                ExprInt1(0)),
-            COND_LS: ExprCond(cf, ExprInt1(0), ExprInt1(1)) | zf,
-            COND_GE: ExprCond(nf - of, ExprInt1(0), ExprInt1(1)),
+            #                ExprInt(0, 1)),
+            COND_LS: ExprCond(cf, ExprInt(0, 1), ExprInt(1, 1)) | zf,
+            COND_GE: ExprCond(nf - of, ExprInt(0, 1), ExprInt(1, 1)),
             COND_LT: nf ^ of,
             # COND_GT: ExprOp('|',
-            #                ExprOp('==', zf, ExprInt1(0)) & (nf | of),
-            # ExprOp('==', nf, ExprInt1(0)) & ExprOp('==', of, ExprInt1(0))),
-            COND_GT: (ExprCond(zf, ExprInt1(0), ExprInt1(1)) &
-                      ExprCond(nf - of, ExprInt1(0), ExprInt1(1))),
+            #                ExprOp('==', zf, ExprInt(0, 1)) & (nf | of),
+            # ExprOp('==', nf, ExprInt(0, 1)) & ExprOp('==', of, ExprInt(0, 1))),
+            COND_GT: (ExprCond(zf, ExprInt(0, 1), ExprInt(1, 1)) &
+                      ExprCond(nf - of, ExprInt(0, 1), ExprInt(1, 1))),
             COND_LE: zf | (nf ^ of),
             }
 
@@ -1028,7 +1055,7 @@ def add_condition_expr(ir, instr, cond, instr_ir):
             break
     if not has_irdst:
         instr_ir.append(ExprAff(ir.IRDst, lbl_next))
-    e_do = irbloc(lbl_do.name, [instr_ir])
+    e_do = IRBlock(lbl_do.name, [instr_ir])
     e = [ExprAff(ir.IRDst, dst_cond)]
     return e, [e_do]
 
@@ -1080,6 +1107,15 @@ mnemo_condm0 = {'add': add,
                 'ubfx': ubfx,
                 'bfc': bfc,
                 'rev': rev,
+                'clz': clz,
+                'uxtab': uxtab,
+                'bkpt': bkpt,
+                'smulbb': smul,
+                'smulbt': smul,
+                'smultb': smul,
+                'smultt': smul,
+                'smulwt': smulw,
+                'smulwb': smulw,
                 }
 
 mnemo_condm1 = {'adds': add,
@@ -1191,9 +1227,9 @@ class arminfo:
     # offset
 
 
-class ir_arml(ir):
+class ir_arml(IntermediateRepresentation):
     def __init__(self, symbol_pool=None):
-        ir.__init__(self, mn_arm, "l", symbol_pool)
+        IntermediateRepresentation.__init__(self, mn_arm, "l", symbol_pool)
         self.pc = PC
         self.sp = SP
         self.IRDst = ExprId('IRDst', 32)
@@ -1203,8 +1239,7 @@ class ir_arml(ir):
         # ir = get_mnemo_expr(self, self.name.lower(), *args)
         if len(args) and isinstance(args[-1], ExprOp):
             if args[-1].op == 'rrx':
-                args[-1] = ExprCompose(
-                    [(args[-1].args[0][1:], 0, 31), (cf, 31, 32)])
+                args[-1] = ExprCompose(args[-1].args[0][1:], cf)
             elif (args[-1].op in ['<<', '>>', '<<a', 'a>>', '<<<', '>>>'] and
                   isinstance(args[-1].args[-1], ExprId)):
                 args[-1] = ExprOp(args[-1].op,
@@ -1215,13 +1250,13 @@ class ir_arml(ir):
         #    return instr_ir, extra_ir
         for i, x in enumerate(instr_ir):
             x = ExprAff(x.dst, x.src.replace_expr(
-                {self.pc: ExprInt32(instr.offset + 8)}))
+                {self.pc: ExprInt(instr.offset + 8, 32)}))
             instr_ir[i] = x
-        for b in extra_ir:
-            for irs in b.irs:
+        for irblock in extra_ir:
+            for irs in irblock.irs:
                 for i, x in enumerate(irs):
                     x = ExprAff(x.dst, x.src.replace_expr(
-                        {self.pc: ExprInt32(instr.offset + 8)}))
+                        {self.pc: ExprInt(instr.offset + 8, 32)}))
                     irs[i] = x
         # return out_ir, extra_ir
         return instr_ir, extra_ir
@@ -1229,14 +1264,14 @@ class ir_arml(ir):
 
 class ir_armb(ir_arml):
     def __init__(self, symbol_pool=None):
-        ir.__init__(self, mn_arm, "b", symbol_pool)
+        IntermediateRepresentation.__init__(self, mn_arm, "b", symbol_pool)
         self.pc = PC
         self.sp = SP
         self.IRDst = ExprId('IRDst', 32)
 
-class ir_armtl(ir):
+class ir_armtl(IntermediateRepresentation):
     def __init__(self, symbol_pool=None):
-        ir.__init__(self, mn_armt, "l", symbol_pool)
+        IntermediateRepresentation.__init__(self, mn_armt, "l", symbol_pool)
         self.pc = PC
         self.sp = SP
         self.IRDst = ExprId('IRDst', 32)
@@ -1246,7 +1281,7 @@ class ir_armtl(ir):
 
 class ir_armtb(ir_armtl):
     def __init__(self, symbol_pool=None):
-        ir.__init__(self, mn_armt, "b", symbol_pool)
+        IntermediateRepresentation.__init__(self, mn_armt, "b", symbol_pool)
         self.pc = PC
         self.sp = SP
         self.IRDst = ExprId('IRDst', 32)

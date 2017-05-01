@@ -2,10 +2,10 @@
 
 import miasm2.expression.expression as m2_expr
 from miasm2.core.graph import DiGraph
-from miasm2.core.asmbloc import asm_label, expr_is_int_or_label, expr_is_label
+from miasm2.core.asmblock import AsmLabel, expr_is_int_or_label, expr_is_label
 from miasm2.expression.simplifications import expr_simp
-from miasm2.ir.symbexec import symbexec
-from miasm2.ir.ir import irbloc, AssignBlock
+from miasm2.ir.symbexec import SymbolicExecutionEngine
+from miasm2.ir.ir import IRBlock, AssignBlock
 from miasm2.ir.translators import Translator
 from miasm2.expression.expression_helper import possible_values
 
@@ -24,19 +24,17 @@ class DependencyNode(object):
     line.
     """
 
-    __slots__ = ["_label", "_element", "_line_nb",
-                 "_step", "_nostep_repr", "_hash"]
+    __slots__ = ["_label", "_element", "_line_nb", "_hash"]
 
     def __init__(self, label, element, line_nb):
         """Create a dependency node with:
-        @label: asm_label instance
+        @label: AsmLabel instance
         @element: Expr instance
         @line_nb: int
         """
         self._label = label
         self._element = element
         self._line_nb = line_nb
-        self._nostep_repr = (self._label, self._line_nb, self._element)
         self._hash = hash(
             (self._label, self._element, self._line_nb))
 
@@ -45,9 +43,7 @@ class DependencyNode(object):
         return self._hash
 
     def __eq__(self, depnode):
-        """Returns True if @self and @depnode are equals.
-        The attribute 'step' is not considered in the comparison.
-        """
+        """Returns True if @self and @depnode are equals."""
         if not isinstance(depnode, self.__class__):
             return False
         return (self.label == depnode.label and
@@ -55,12 +51,10 @@ class DependencyNode(object):
                 self.line_nb == depnode.line_nb)
 
     def __cmp__(self, node):
-        """Compares @self with @node. The step attribute is not taken into
-        account in the comparison.
-        """
+        """Compares @self with @node."""
         if not isinstance(node, self.__class__):
-            raise ValueError("Compare error between %s, %s" % (self.__class__,
-                                                               node.__class__))
+            return cmp(self.__class__, node.__class__)
+
         return cmp((self.label, self.element, self.line_nb),
                    (node.label, node.element, node.line_nb))
 
@@ -73,11 +67,6 @@ class DependencyNode(object):
     def __repr__(self):
         """Returns a string representation of DependencyNode"""
         return self.__str__()
-
-    @property
-    def nostep_repr(self):
-        """Returns a representation of @self ignoring the step attribute"""
-        return self._nostep_repr
 
     @property
     def label(self):
@@ -101,9 +90,8 @@ class DependencyState(object):
     Store intermediate depnodes states during dependencygraph analysis
     """
 
-    def __init__(self, label, inputs, pending, line_nb=None):
+    def __init__(self, label, pending, line_nb=None):
         self.label = label
-        self.inputs = inputs
         self.history = [label]
         self.pending = {k: set(v) for k, v in pending.iteritems()}
         self.line_nb = line_nb
@@ -119,9 +107,9 @@ class DependencyState(object):
 
     def extend(self, label):
         """Return a copy of itself, with itself in history
-        @label: asm_label instance for the new DependencyState's label
+        @label: AsmLabel instance for the new DependencyState's label
         """
-        new_state = self.__class__(label, self.inputs, self.pending)
+        new_state = self.__class__(label, self.pending)
         new_state.links = set(self.links)
         new_state.history = self.history + [label]
         return new_state
@@ -206,12 +194,13 @@ class DependencyResult(DependencyState):
 
     """Container and methods for DependencyGraph results"""
 
-    def __init__(self, state, ira):
+    def __init__(self, ira, initial_state, state, inputs):
+        self.initial_state = initial_state
         self.label = state.label
-        self.inputs = state.inputs
         self.history = state.history
         self.pending = state.pending
         self.line_nb = state.line_nb
+        self.inputs = inputs
         self.links = state.links
         self._ira = ira
 
@@ -258,7 +247,7 @@ class DependencyResult(DependencyState):
             self._has_loop = self.graph.has_loop()
         return self._has_loop
 
-    def irblock_slice(self, irb):
+    def irblock_slice(self, irb, max_line=None):
         """Slice of the dependency nodes on the irblock @irb
         @irb: irbloc instance
         """
@@ -272,14 +261,16 @@ class DependencyResult(DependencyState):
                                      set()).add(depnode.element)
 
         for line_nb, elements in sorted(line2elements.iteritems()):
-            assignblk = AssignBlock()
+            if max_line is not None and line_nb >= max_line:
+                break
+            assignmnts = {}
             for element in elements:
                 if element in irb.irs[line_nb]:
                     # constants, label, ... are not in destination
-                    assignblk[element] = irb.irs[line_nb][element]
-            assignblks.append(assignblk)
+                    assignmnts[element] = irb.irs[line_nb][element]
+            assignblks.append(AssignBlock(assignmnts))
 
-        return irbloc(irb.label, assignblks)
+        return IRBlock(irb.label, assignblks)
 
     def emul(self, ctx=None, step=False):
         """Symbolic execution of relevant nodes according to the history
@@ -296,13 +287,19 @@ class DependencyResult(DependencyState):
         assignblks = []
 
         # Build a single affectation block according to history
-        for label in self.relevant_labels[::-1]:
-            assignblks += self.irblock_slice(self._ira.blocs[label]).irs
+        last_index = len(self.relevant_labels)
+        for index, label in enumerate(reversed(self.relevant_labels), 1):
+            if index == last_index and label == self.initial_state.label:
+                line_nb = self.initial_state.line_nb
+            else:
+                line_nb = None
+            assignblks += self.irblock_slice(self._ira.blocks[label],
+                                             line_nb).irs
 
         # Eval the block
-        temp_label = asm_label("Temp")
-        symb_exec = symbexec(self._ira, ctx_init)
-        symb_exec.emulbloc(irbloc(temp_label, assignblks), step=step)
+        temp_label = AsmLabel("Temp")
+        symb_exec = SymbolicExecutionEngine(self._ira, ctx_init)
+        symb_exec.emulbloc(IRBlock(temp_label, assignblks), step=step)
 
         # Return only inputs values (others could be wrongs)
         return {element: symb_exec.symbols[element]
@@ -357,21 +354,25 @@ class DependencyResultImplicit(DependencyResult):
         if ctx is not None:
             ctx_init.update(ctx)
         solver = z3.Solver()
-        symb_exec = symbexec(self._ira, ctx_init)
+        symb_exec = SymbolicExecutionEngine(self._ira, ctx_init)
         history = self.history[::-1]
         history_size = len(history)
         translator = Translator.to_language("z3")
         size = self._ira.IRDst.size
 
-        for hist_nb, label in enumerate(history):
-            irb = self.irblock_slice(self._ira.blocs[label])
+        for hist_nb, label in enumerate(history, 1):
+            if hist_nb == history_size and label == self.initial_state.label:
+                line_nb = self.initial_state.line_nb
+            else:
+                line_nb = None
+            irb = self.irblock_slice(self._ira.blocks[label], line_nb)
 
             # Emul the block and get back destination
             dst = symb_exec.emulbloc(irb, step=step)
 
             # Add constraint
-            if hist_nb + 1 < history_size:
-                next_label = history[hist_nb + 1]
+            if hist_nb < history_size:
+                next_label = history[hist_nb]
                 expected = symb_exec.eval_expr(m2_expr.ExprId(next_label,
                                                               size))
                 solver.add(
@@ -415,7 +416,7 @@ class FollowExpr(object):
         """Build a set of FollowExpr(DependencyNode) from the @follow_exprs set
         of FollowExpr
         @follow_exprs: set of FollowExpr
-        @label: asm_label instance
+        @label: AsmLabel instance
         @line: integer
         """
         dependencies = set()
@@ -579,7 +580,7 @@ class DependencyGraph(object):
         """Follow dependencies tracked in @state in the current irbloc
         @state: instance of DependencyState"""
 
-        irb = self._ira.blocs[state.label]
+        irb = self._ira.blocks[state.label]
         line_nb = len(irb.irs) if state.line_nb is None else state.line_nb
 
         for cur_line_nb, assignblk in reversed(list(enumerate(irb.irs[:line_nb]))):
@@ -589,16 +590,16 @@ class DependencyGraph(object):
         """Compute the dependencies of @elements at line number @line_nb in
         the block named @label in the current IRA, before the execution of
         this line. Dependency check stop if one of @heads is reached
-        @label: asm_label instance
+        @label: AsmLabel instance
         @element: set of Expr instances
         @line_nb: int
-        @heads: set of asm_label instances
+        @heads: set of AsmLabel instances
         Return an iterator on DiGraph(DependencyNode)
         """
         # Init the algorithm
-        pending = {element: set() for element in elements}
-        state = DependencyState(label, elements, pending, line_nb)
-        todo = set([state])
+        inputs = {element: set() for element in elements}
+        initial_state = DependencyState(label, inputs, line_nb)
+        todo = set([initial_state])
         done = set()
         dpResultcls = DependencyResultImplicit if self._implicit else DependencyResult
 
@@ -612,7 +613,7 @@ class DependencyGraph(object):
             if (not state.pending or
                     state.label in heads or
                     not self._ira.graph.predecessors(state.label)):
-                yield dpResultcls(state, self._ira)
+                yield dpResultcls(self._ira, initial_state, state, elements)
                 if not state.pending:
                     continue
 
@@ -629,7 +630,7 @@ class DependencyGraph(object):
         argument.
         PRE: Labels and lines of depnodes have to be equals
         @depnodes: set of DependencyNode instances
-        @heads: set of asm_label instances
+        @heads: set of AsmLabel instances
         """
         lead = list(depnodes)[0]
         elements = set(depnode.element for depnode in depnodes)

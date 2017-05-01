@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #-*- coding:utf-8 -*-
 
 from miasm2.expression.expression import *
@@ -89,14 +88,19 @@ all_regs_ids = [
 
     exception_flags,
     PC,
-    WZR, WZR,
+    WZR,
     zf, nf, of, cf,
-    XZR, WZR,
+    XZR
 
 ]
 
 
 all_regs_ids_no_alias = all_regs_ids
+
+attrib_to_regs = {
+    'l': all_regs_ids_no_alias,
+    'b': all_regs_ids_no_alias,
+}
 
 all_regs_ids_byname = dict([(x.name, x) for x in all_regs_ids])
 
@@ -108,12 +112,12 @@ all_regs_ids_init = (simd08_init +
                      gpregs32_init +
                      gpregs64_init +
                      [
-                         ExprInt32(0),
+                         ExprInt(0, 32),
                          PC_init,
                          WZR_init,
                          XZR_init,
                          zf_init, nf_init, of_init, cf_init,
-                         ExprInt64(0), ExprInt32(0),
+                         ExprInt(0, 64), ExprInt(0, 32),
                      ]
                      )
 

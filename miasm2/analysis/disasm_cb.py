@@ -1,10 +1,9 @@
-#!/usr/bin/env python
 #-*- coding:utf-8 -*-
 
-from miasm2.expression.expression import ExprInt, ExprId, ExprMem, MatchExpr
+from miasm2.expression.expression import ExprInt, ExprId, ExprMem, match_expr
 from miasm2.expression.simplifications import expr_simp
-from miasm2.core.asmbloc \
-    import asm_symbol_pool, asm_constraint_next, asm_constraint_to
+from miasm2.core.asmblock \
+    import AsmSymbolPool, AsmConstraintNext, AsmConstraintTo
 from miasm2.core.utils import upck32
 # from miasm2.core.graph import DiGraph
 
@@ -26,21 +25,21 @@ def arm_guess_subcall(
     mnemo, attrib, pool_bin, cur_bloc, offsets_to_dis, symbol_pool):
     ira = get_ira(mnemo, attrib)
 
-    sp = asm_symbol_pool()
+    sp = AsmSymbolPool()
     ir_arch = ira(sp)
     print '###'
     print cur_bloc
     ir_arch.add_bloc(cur_bloc)
 
-    ir_blocs = ir_arch.blocs.values()
+    ir_blocks = ir_arch.blocks.values()
     # flow_graph = DiGraph()
     to_add = set()
-    for irb in ir_blocs:
+    for irblock in ir_blocks:
         # print 'X'*40
-        # print irb
+        # print irblock
         pc_val = None
         lr_val = None
-        for exprs in irb.irs:
+        for exprs in irblock.irs:
             for e in exprs:
                 if e.dst == ir_arch.pc:
                     pc_val = e.src
@@ -55,11 +54,11 @@ def arm_guess_subcall(
         if lr_val.arg != l.offset + l.l:
             continue
         # print 'IS CALL!'
-        l = symbol_pool.getby_offset_create(int(lr_val.arg))
-        c = asm_constraint_next(l)
+        l = symbol_pool.getby_offset_create(int(lr_val))
+        c = AsmConstraintNext(l)
 
         to_add.add(c)
-        offsets_to_dis.add(int(lr_val.arg))
+        offsets_to_dis.add(int(lr_val))
 
     # if to_add:
     #    print 'R'*70
@@ -75,17 +74,17 @@ def arm_guess_jump_table(
     jra = ExprId('jra')
     jrb = ExprId('jrb')
 
-    sp = asm_symbol_pool()
+    sp = AsmSymbolPool()
     ir_arch = ira(sp)
     ir_arch.add_bloc(cur_bloc)
 
-    ir_blocs = ir_arch.blocs.values()
-    for irb in ir_blocs:
+    ir_blocks = ir_arch.blocks.values()
+    for irblock in ir_blocks:
         # print 'X'*40
-        # print irb
+        # print irblock
         pc_val = None
         # lr_val = None
-        for exprs in irb.irs:
+        for exprs in irblock.irs:
             for e in exprs:
                 if e.dst == ir_arch.pc:
                     pc_val = e.src
@@ -100,13 +99,13 @@ def arm_guess_jump_table(
         ad = pc_val.arg
         ad = expr_simp(ad)
         print ad
-        res = MatchExpr(ad, jra + jrb, set([jra, jrb]))
+        res = match_expr(ad, jra + jrb, set([jra, jrb]))
         if res is False:
             raise NotImplementedError('not fully functional')
         print res
         if not isinstance(res[jrb], ExprInt):
             raise NotImplementedError('not fully functional')
-        base_ad = int(res[jrb].arg)
+        base_ad = int(res[jrb])
         print base_ad
         addrs = set()
         i = -1
@@ -126,7 +125,7 @@ def arm_guess_jump_table(
         for ad in addrs:
             offsets_to_dis.add(ad)
             l = symbol_pool.getby_offset_create(ad)
-            c = asm_constraint_to(l)
+            c = AsmConstraintTo(l)
             cur_bloc.addto(c)
 
 guess_funcs = []

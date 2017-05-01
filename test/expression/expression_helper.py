@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#! /usr/bin/env python2
 #-*- coding:utf-8 -*-
 
 import unittest
@@ -11,16 +11,15 @@ class TestExpressionExpressionHelper(unittest.TestCase):
         from miasm2.expression.expression_helper import Variables_Identifier
 
         # Build a complex expression
-        cst = m2_expr.ExprInt16(0x100)
+        cst = m2_expr.ExprInt(0x100, 16)
         eax = m2_expr.ExprId("EAX")
         ebx = m2_expr.ExprId("EBX")
         ax = eax[0:16]
         expr = eax + ebx
-        expr = m2_expr.ExprCompose([(ax, 0, 16), (expr[16:32], 16, 32)])
+        expr = m2_expr.ExprCompose(ax, expr[16:32])
         expr2 = m2_expr.ExprMem((eax + ebx) ^ (eax), size=16)
         expr2 = expr2 | ax | expr2 | cst
-        exprf = expr - expr + m2_expr.ExprCompose([(expr2, 0, 16),
-                                                   (cst, 16, 32)])
+        exprf = expr - expr + m2_expr.ExprCompose(expr2, cst)
 
         # Identify variables
         vi = Variables_Identifier(exprf)
@@ -63,7 +62,7 @@ class TestExpressionExpressionHelper(unittest.TestCase):
         ## Corner case: each sub var depends on itself
         mem1 = m2_expr.ExprMem(ebx, size=32)
         mem2 = m2_expr.ExprMem(mem1, size=32)
-        cst2 = m2_expr.ExprInt32(-1)
+        cst2 = m2_expr.ExprInt(-1, 32)
         expr_mini = ((eax ^ mem2 ^ cst2) & (mem2 ^ (eax + mem2)))[31:32]
 
         ## Build

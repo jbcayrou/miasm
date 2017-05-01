@@ -76,7 +76,9 @@ PyObject* set_alarm(VmMngr* self)
 {
 	global_vmmngr = self;
 	signal(SIGALRM, sig_alarm);
-	return PyLong_FromUnsignedLongLong((uint64_t)0);
+
+	Py_INCREF(Py_None);
+	return Py_None;
 }
 
 
@@ -90,7 +92,6 @@ PyObject* vm_add_memory_page(VmMngr* self, PyObject* args)
 	uint64_t buf_size;
 	char* buf_data;
 	Py_ssize_t length;
-	uint64_t ret = 0x1337beef;
 	uint64_t page_addr;
 	uint64_t page_access;
 	char* name_ptr;
@@ -98,7 +99,7 @@ PyObject* vm_add_memory_page(VmMngr* self, PyObject* args)
 	struct memory_page_node * mpn;
 
 	if (!PyArg_ParseTuple(args, "OOO|O", &addr, &access, &item_str, &name))
-		return NULL;
+		RAISE(PyExc_TypeError,"Cannot parse arguments");
 
 	PyGetInt(addr, page_addr);
 	PyGetInt(access, page_access);
@@ -128,8 +129,8 @@ PyObject* vm_add_memory_page(VmMngr* self, PyObject* args)
 	memcpy(mpn->ad_hp, buf_data, buf_size);
 	add_memory_page(&self->vm_mngr, mpn);
 
-	return PyLong_FromUnsignedLongLong((uint64_t)ret);
-
+	Py_INCREF(Py_None);
+	return Py_None;
 }
 
 
@@ -138,14 +139,12 @@ PyObject* vm_set_mem_access(VmMngr* self, PyObject* args)
 {
 	PyObject *addr;
 	PyObject *access;
-
-	uint64_t ret = 0x1337beef;
 	uint64_t page_addr;
 	uint64_t page_access;
 	struct memory_page_node * mpn;
 
 	if (!PyArg_ParseTuple(args, "OO", &addr, &access))
-		return NULL;
+		RAISE(PyExc_TypeError,"Cannot parse arguments");
 
 	PyGetInt(addr, page_addr);
 	PyGetInt(access, page_access);
@@ -157,7 +156,9 @@ PyObject* vm_set_mem_access(VmMngr* self, PyObject* args)
 	}
 
 	mpn->access = page_access;
-	return PyLong_FromUnsignedLongLong((uint64_t)ret);
+
+	Py_INCREF(Py_None);
+	return Py_None;
 }
 
 PyObject* vm_set_mem(VmMngr* self, PyObject* args)
@@ -169,15 +170,15 @@ PyObject* vm_set_mem(VmMngr* self, PyObject* args)
        char * buffer;
        uint64_t size;
        uint64_t addr;
-       int ret = 0x1337;
+       int ret;
 
        if (!PyArg_ParseTuple(args, "OO", &py_addr, &py_buffer))
-	      return NULL;
+	       RAISE(PyExc_TypeError,"Cannot parse arguments");
 
        PyGetInt(py_addr, addr);
 
-       if(!PyString_Check(py_buffer))
-	      RAISE(PyExc_TypeError,"arg must be str");
+       if (!PyString_Check(py_buffer))
+	       RAISE(PyExc_TypeError,"arg must be str");
 
        size = PyString_Size(py_buffer);
        PyString_AsStringAndSize(py_buffer, &buffer, &py_length);
@@ -186,7 +187,8 @@ PyObject* vm_set_mem(VmMngr* self, PyObject* args)
        if (ret < 0)
 	      RAISE(PyExc_TypeError, "Error in set_mem");
 
-       check_write_code_bloc(&self->vm_mngr, size*8, addr);
+       add_mem_write(&self->vm_mngr, addr, size);
+       check_invalid_code_blocs(&self->vm_mngr);
 
        Py_INCREF(Py_None);
        return Py_None;
@@ -194,6 +196,25 @@ PyObject* vm_set_mem(VmMngr* self, PyObject* args)
 
 
 
+PyObject* vm_get_mem_access(VmMngr* self, PyObject* args)
+{
+	PyObject *py_addr;
+	uint64_t page_addr;
+	struct memory_page_node * mpn;
+
+	if (!PyArg_ParseTuple(args, "O", &py_addr))
+		RAISE(PyExc_TypeError,"Cannot parse arguments");
+
+	PyGetInt(py_addr, page_addr);
+
+	mpn = get_memory_page_from_address(&self->vm_mngr, page_addr, 1);
+	if (!mpn){
+		PyErr_SetString(PyExc_RuntimeError, "cannot find address");
+		return 0;
+	}
+
+	return PyLong_FromUnsignedLongLong((uint64_t)mpn->access);
+}
 
 PyObject* vm_get_mem(VmMngr* self, PyObject* args)
 {
@@ -207,15 +228,14 @@ PyObject* vm_get_mem(VmMngr* self, PyObject* args)
        int ret;
 
        if (!PyArg_ParseTuple(args, "OO", &py_addr, &py_len))
-	      return NULL;
+	       RAISE(PyExc_TypeError,"Cannot parse arguments");
 
        PyGetInt(py_addr, addr);
        PyGetInt(py_len, size);
 
        ret = vm_read_mem(&self->vm_mngr, addr, &buf_out, size);
        if (ret < 0) {
-	      PyErr_SetString(PyExc_RuntimeError, "cannot find address");
-	      return NULL;
+	       RAISE(PyExc_TypeError,"Cannot find address");
        }
 
        obj_out = PyString_FromStringAndSize(buf_out, size);
@@ -235,13 +255,21 @@ PyObject* vm_add_memory_breakpoint(VmMngr* self, PyObject* args)
 	uint64_t b_access;
 
 	if (!PyArg_ParseTuple(args, "OOO", &ad, &size, &access))
-		return NULL;
+		RAISE(PyExc_TypeError,"Cannot parse arguments");
 
 	PyGetInt(ad, b_ad);
 	PyGetInt(size, b_size);
 	PyGetInt(access, b_access);
 
 	add_memory_breakpoint(&self->vm_mngr, b_ad, b_size, b_access);
+
+	/* Raise exception in the following pattern:
+	   - set_mem(XXX)
+	   - add_memory_breakpoint(XXX)
+	   -> Here, there is a pending breakpoint not raise
+	 */
+	check_memory_breakpoint(&self->vm_mngr);
+
 	Py_INCREF(Py_None);
 	return Py_None;
 }
@@ -255,7 +283,7 @@ PyObject* vm_remove_memory_breakpoint(VmMngr* self, PyObject* args)
 	uint64_t b_access;
 
 	if (!PyArg_ParseTuple(args, "OO", &ad, &access))
-		return NULL;
+		RAISE(PyExc_TypeError,"Cannot parse arguments");
 
 	PyGetInt(ad, b_ad);
 	PyGetInt(access, b_access);
@@ -272,7 +300,7 @@ PyObject* vm_set_exception(VmMngr* self, PyObject* args)
 	uint64_t i;
 
 	if (!PyArg_ParseTuple(args, "O", &item1))
-		return NULL;
+		RAISE(PyExc_TypeError,"Cannot parse arguments");
 
 	PyGetInt(item1, i);
 
@@ -318,6 +346,63 @@ PyObject* vm_reset_memory_breakpoint(VmMngr* self, PyObject* args)
     Py_INCREF(Py_None);
     return Py_None;
 
+}
+
+PyObject* vm_reset_memory_access(VmMngr* self, PyObject* args)
+{
+    reset_memory_access(&self->vm_mngr);
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+PyObject* py_add_mem_read(VmMngr* self, PyObject* args)
+{
+	PyObject *py_addr;
+	PyObject *py_size;
+	uint64_t addr;
+	uint64_t size;
+
+	if (!PyArg_ParseTuple(args, "OO", &py_addr, &py_size))
+		RAISE(PyExc_TypeError,"Cannot parse arguments");
+
+	PyGetInt(py_addr, addr);
+	PyGetInt(py_size, size);
+	add_mem_read(&self->vm_mngr, addr, size);
+	Py_INCREF(Py_None);
+	return Py_None;
+
+}
+
+PyObject* py_add_mem_write(VmMngr* self, PyObject* args)
+{
+	PyObject *py_addr;
+	PyObject *py_size;
+	uint64_t addr;
+	uint64_t size;
+
+	if (!PyArg_ParseTuple(args, "OO", &py_addr, &py_size))
+		RAISE(PyExc_TypeError,"Cannot parse arguments");
+
+	PyGetInt(py_addr, addr);
+	PyGetInt(py_size, size);
+	add_mem_write(&self->vm_mngr, addr, size);
+	Py_INCREF(Py_None);
+	return Py_None;
+
+}
+
+PyObject* vm_check_invalid_code_blocs(VmMngr* self, PyObject* args)
+{
+    check_invalid_code_blocs(&self->vm_mngr);
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+PyObject* vm_check_memory_breakpoint(VmMngr* self, PyObject* args)
+{
+    check_memory_breakpoint(&self->vm_mngr);
+    Py_INCREF(Py_None);
+    return Py_None;
 }
 
 PyObject *vm_dump(PyObject* self)
@@ -397,13 +482,12 @@ PyObject* vm_add_code_bloc(VmMngr *self, PyObject *args)
 {
 	PyObject *item1;
 	PyObject *item2;
-	uint64_t ret = 0x1337beef;
 	uint64_t ad_start, ad_stop, ad_code = 0;
 
 	struct code_bloc_node * cbp;
 
 	if (!PyArg_ParseTuple(args, "OO", &item1, &item2))
-		return NULL;
+		RAISE(PyExc_TypeError,"Cannot parse arguments");
 
 	PyGetInt(item1, ad_start);
 	PyGetInt(item2, ad_stop);
@@ -413,7 +497,9 @@ PyObject* vm_add_code_bloc(VmMngr *self, PyObject *args)
 	cbp->ad_stop = ad_stop;
 	cbp->ad_code = ad_code;
 	add_code_bloc(&self->vm_mngr, cbp);
-	return PyLong_FromUnsignedLongLong((uint64_t)ret);
+
+	Py_INCREF(Py_None);
+	return Py_None;
 }
 
 PyObject* vm_dump_code_bloc_pool(VmMngr* self)
@@ -425,23 +511,6 @@ PyObject* vm_dump_code_bloc_pool(VmMngr* self)
 }
 
 
-PyObject* vm_set_addr2obj(VmMngr* self, PyObject* args)
-{
-	PyObject* addr2obj;
-
-	if (!PyArg_ParseTuple(args, "O", &addr2obj))
-		return NULL;
-
-	if (self->vm_mngr.addr2obj != NULL){
-		Py_DECREF(self->vm_mngr.addr2obj);
-	}
-
-	Py_INCREF(addr2obj);
-	self->vm_mngr.addr2obj = addr2obj;
-	Py_INCREF(Py_None);
-	return Py_None;
-}
-
 
 PyObject* vm_is_mapped(VmMngr* self, PyObject* args)
 {
@@ -452,13 +521,30 @@ PyObject* vm_is_mapped(VmMngr* self, PyObject* args)
 	int ret;
 
 	if (!PyArg_ParseTuple(args, "OO", &ad, &size))
-		return NULL;
+		RAISE(PyExc_TypeError,"Cannot parse arguments");
 
 	PyGetInt(ad, b_ad);
 	PyGetInt(size, b_size);
 	ret = is_mapped(&self->vm_mngr, b_ad, b_size);
 	return PyLong_FromUnsignedLongLong((uint64_t)ret);
 }
+
+PyObject* vm_get_memory_read(VmMngr* self, PyObject* args)
+{
+	PyObject* result;
+	result = get_memory_read(&self->vm_mngr);
+	Py_INCREF(result);
+	return result;
+}
+
+PyObject* vm_get_memory_write(VmMngr* self, PyObject* args)
+{
+	PyObject* result;
+	result = get_memory_write(&self->vm_mngr);
+	Py_INCREF(result);
+	return result;
+}
+
 
 
 static PyObject *
@@ -516,52 +602,71 @@ static PyMemberDef VmMngr_members[] = {
 
 static PyMethodDef VmMngr_methods[] = {
 	{"init_memory_page_pool", (PyCFunction)vm_init_memory_page_pool, METH_VARARGS,
-	 "X"},
+	 "init_memory_page_pool() -> Initialize the VmMngr memory"},
 	{"init_memory_breakpoint", (PyCFunction)vm_init_memory_breakpoint, METH_VARARGS,
-	 "X"},
+	 "init_memory_breakpoint() -> Initialize the VmMngr memory breakpoints"},
 	{"init_code_bloc_pool",(PyCFunction)vm_init_code_bloc_pool, METH_VARARGS,
-	 "X"},
+	 "init_code_bloc_pool() -> Initialize the VmMngr jitted code blocks"},
 	{"set_mem_access", (PyCFunction)vm_set_mem_access, METH_VARARGS,
-	 "X"},
+	 "set_mem_access(address, access) -> Change the protection of the page at @address with @access"},
 	{"set_mem", (PyCFunction)vm_set_mem, METH_VARARGS,
-	 "X"},
-	{"set_addr2obj", (PyCFunction)vm_set_addr2obj, METH_VARARGS,
-	 "X"},
+	 "set_mem(address, data) -> Set a @data in memory at @address"},
 	{"is_mapped", (PyCFunction)vm_is_mapped, METH_VARARGS,
-	 "X"},
+	 "is_mapped(address, size) -> Check if the memory region at @address of @size bytes is fully mapped"},
 	{"add_code_bloc",(PyCFunction)vm_add_code_bloc, METH_VARARGS,
-	 "X"},
+	 "add_code_bloc(address_start, address_stop) -> Add a jitted code block between [@address_start, @address_stop["},
+	{"get_mem_access", (PyCFunction)vm_get_mem_access, METH_VARARGS,
+	 "get_mem_access(address) -> Retrieve the memory protection of the page at @address"},
 	{"get_mem", (PyCFunction)vm_get_mem, METH_VARARGS,
-	 "X"},
+	 "get_mem(addr, size) -> Get the memory content at @address of @size bytes"},
 	{"add_memory_page",(PyCFunction)vm_add_memory_page, METH_VARARGS,
-	 "X"},
+	 "add_memory_page(address, access, content [, cmt]) -> Maps a memory page at @address of len(@content) bytes containing @content with protection @access\n"
+	"@cmt is a comment linked to the memory page"},
 	{"add_memory_breakpoint",(PyCFunction)vm_add_memory_breakpoint, METH_VARARGS,
-	 "X"},
+	 "add_memory_breakpoint(address, size, access) -> Add a memory breakpoint at @address of @size bytes with @access type"},
 	{"remove_memory_breakpoint",(PyCFunction)vm_remove_memory_breakpoint, METH_VARARGS,
-	 "X"},
+	 "remove_memory_breakpoint(address, access) -> Remove a memory breakpoint at @address with @access type"},
 	{"set_exception", (PyCFunction)vm_set_exception, METH_VARARGS,
-	 "X"},
+	 "set_exception(exception) -> Set the VmMngr exception flags to @exception"},
 	{"dump_memory_breakpoint", (PyCFunction)vm_dump_memory_breakpoint, METH_VARARGS,
-	 "X"},
+	 "dump_memory_breakpoint() -> Lists each memory breakpoint"},
 	{"get_all_memory",(PyCFunction)vm_get_all_memory, METH_VARARGS,
-	 "X"},
+	 "get_all_memory() -> Returns a dictionary representing the VmMngr memory.\n"
+	 "Keys are the addresses of each memory page.\n"
+	 "Values are another dictionary containing page properties ('data', 'size', 'access')"
+	},
 	{"reset_memory_page_pool", (PyCFunction)vm_reset_memory_page_pool, METH_VARARGS,
-	 "X"},
+	 "reset_memory_page_pool() -> Remove all memory pages"},
 	{"reset_memory_breakpoint", (PyCFunction)vm_reset_memory_breakpoint, METH_VARARGS,
-	 "X"},
+	 "reset_memory_breakpoint() -> Remove all memory breakpoints"},
 	{"reset_code_bloc_pool", (PyCFunction)vm_reset_code_bloc_pool, METH_VARARGS,
-	 "X"},
+	 "reset_code_bloc_pool() -> Remove all jitted blocks"},
 	{"set_alarm", (PyCFunction)set_alarm, METH_VARARGS,
-	 "X"},
+	 "set_alarm() -> Force a timer based alarm during a code emulation"},
 	{"get_exception",(PyCFunction)vm_get_exception, METH_VARARGS,
-	 "X"},
-	{"get_exception",(PyCFunction)vm_get_exception, METH_VARARGS,
-	 "X"},
-
+	 "get_exception() -> Returns the VmMngr exception flags"},
 	{"set_big_endian",(PyCFunction)vm_set_big_endian, METH_VARARGS,
-	 "X"},
+	 "set_big_endian() -> Set the VmMngr to Big Endian"},
 	{"set_little_endian",(PyCFunction)vm_set_little_endian, METH_VARARGS,
-	 "X"},
+	 "set_little_endian() -> Set the VmMngr to Little Endian"},
+	{"get_memory_read",(PyCFunction)vm_get_memory_read, METH_VARARGS,
+	 "get_memory_read() -> Retrieve last instruction READ access\n"
+	 "This function is only valid in a memory breakpoint callback."
+	},
+	{"get_memory_write",(PyCFunction)vm_get_memory_write, METH_VARARGS,
+	 "get_memory_write() -> Retrieve last instruction WRITE access\n"
+	 "This function is only valid in a memory breakpoint callback."
+	},
+	{"reset_memory_access",(PyCFunction)vm_reset_memory_access, METH_VARARGS,
+	 "reset_memory_access() -> Reset last memory READ/WRITE"},
+	{"add_mem_read",(PyCFunction)py_add_mem_read, METH_VARARGS,
+	 "add_mem_read(address, size) -> Add a READ access at @address of @size bytes"},
+	{"add_mem_write",(PyCFunction)py_add_mem_write, METH_VARARGS,
+	 "add_mem_write(address, size) -> Add a WRITE access at @address of @size bytes"},
+	{"check_invalid_code_blocs",(PyCFunction)vm_check_invalid_code_blocs, METH_VARARGS,
+	 "check_invalid_code_blocs() -> Set the AUTOMOD flag in exception in case of automodified code"},
+	{"check_memory_breakpoint",(PyCFunction)vm_check_memory_breakpoint, METH_VARARGS,
+	 "check_memory_breakpoint() -> Set the BREAKPOINT_INTERN flag in exception in case of memory breakpoint occurred"},
 
 	{NULL}  /* Sentinel */
 };
@@ -576,7 +681,7 @@ VmMngr_init(VmMngr *self, PyObject *args, PyObject *kwds)
 static PyGetSetDef VmMngr_getseters[] = {
     {"vmmngr",
      (getter)VmMngr_get_vmmngr, (setter)VmMngr_set_vmmngr,
-     "first name",
+     "vmmngr object",
      NULL},
     {NULL}  /* Sentinel */
 };
@@ -603,7 +708,7 @@ static PyTypeObject VmMngrType = {
     0,                         /*tp_setattro*/
     0,                         /*tp_as_buffer*/
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /*tp_flags*/
-    "VmMngr objects",          /* tp_doc */
+    "VmMngr object",           /* tp_doc */
     0,			       /* tp_traverse */
     0,			       /* tp_clear */
     0,			       /* tp_richcompare */

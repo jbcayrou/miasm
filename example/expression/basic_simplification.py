@@ -10,9 +10,8 @@ a = ExprId('eax')
 b = ExprId('ebx')
 
 exprs = [a + b - a,
-         ExprInt32(0x12) + ExprInt32(0x30) - a,
-         ExprCompose([(a[:8], 0, 8),
-                      (a[8:16], 8, 16)])]
+         ExprInt(0x12, 32) + ExprInt(0x30, 32) - a,
+         ExprCompose(a[:8], a[8:16])]
 
 for e in exprs:
     print '*' * 40

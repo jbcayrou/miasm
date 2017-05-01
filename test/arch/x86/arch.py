@@ -1,14 +1,10 @@
-import os
 import time
 import miasm2.expression.expression as m2_expr
-from miasm2.arch.x86.arch import mn_x86, deref_mem_ad, parse_ast, ast_int2expr, \
+from miasm2.arch.x86.arch import mn_x86, deref_mem_ad, ParseAst, ast_int2expr, \
     base_expr, rmarg, print_size
 from miasm2.arch.x86.sem import ir_x86_16, ir_x86_32, ir_x86_64
 from miasm2.core.bin_stream import bin_stream_str
 
-filename = os.environ.get('PYTHONSTARTUP')
-if filename and os.path.isfile(filename):
-    execfile(filename)
 for s in ["[EAX]",
           "[0x10]",
           "[EBX + 0x10]",
@@ -34,7 +30,7 @@ def my_ast_id2expr(t):
     r = reg_and_id.get(t, m2_expr.ExprId(t, size=32))
     return r
 
-my_var_parser = parse_ast(my_ast_id2expr, ast_int2expr)
+my_var_parser = ParseAst(my_ast_id2expr, ast_int2expr)
 base_expr.setParseAction(my_var_parser)
 
 for s in ['EAX',
@@ -72,6 +68,8 @@ reg_tests = [
     (m64, "XXXXXXXX    CPUID",
     "0fa2"),
 
+    (m32, "XXXXXXXX    SETALC",
+    "D6"),
 
     (m32, "XXXXXXXX    PMINSW     MM0, QWORD PTR [EAX]",
     "0fea00"),
@@ -2126,8 +2124,12 @@ reg_tests = [
 
     (m32, "00000000    SIDT       DWORD PTR [EAX]",
      "0f0108"),
-    (m32, "00000000    SLDT       DWORD PTR [EAX]",
+    (m32, "00000000    SLDT       WORD PTR [EAX]",
      "0f0000"),
+    (m32, "00000000    SLDT       EAX",
+     "0f00C0"),
+    (m32, "00000000    SLDT       AX",
+     "660f00C0"),
 
 
     (m32, "00000000    LGDT       DWORD PTR [EAX]",
@@ -2322,6 +2324,8 @@ reg_tests = [
 
     (m64, "00000000    MOVMSKPS   EAX, XMM2",
      "0f50c2"),
+    (m64, "00000000    MOVMSKPS   R8D, XMM2",
+     "440f50c2"),
 
     (m32, "00000000    ADDSS      XMM2, DWORD PTR [ECX]",
      "f30f5811"),
@@ -2719,6 +2723,9 @@ reg_tests = [
     (m32, "00000000    PSLLW      XMM6, 0x5",
     "660F71F605"),
 
+    (m64, "00000000    PSLLDQ     XMM2, 0x1",
+    "660F73Fa01"),
+
 
     (m32, "00000000    PSLLQ      MM2, QWORD PTR [EDX]",
     "0FF312"),
@@ -2885,6 +2892,9 @@ reg_tests = [
     (m64, "00000000    PEXTRQ     QWORD PTR [RDX], XMM2, 0x5",
     "66480F3A161205"),
 
+    (m64, "00000000    PEXTRW     RCX, XMM14, 0x5",
+    "664C0F3A15F105"),
+
 
     (m32, "00000000    UNPCKHPS   XMM2, XMMWORD PTR [EDX]",
      "0f1512"),
@@ -2909,6 +2919,12 @@ reg_tests = [
      "0FD7C7"),
     (m32, "00000000    PMOVMSKB   EAX, XMM7",
      "660FD7C7"),
+
+    (m64, "XXXXXXXX    PMOVMSKB   R8D, XMM2",
+    "66440fd7c2"),
+    (m64, "XXXXXXXX    PMOVMSKB   EAX, XMM2",
+    "660fd7c2"),
+
 
     (m64, "00000000    SHUFPS     XMM0, XMM6, 0x44",
      "0fc6c644"),

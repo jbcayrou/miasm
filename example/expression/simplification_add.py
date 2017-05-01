@@ -1,11 +1,6 @@
 import miasm2.expression.expression as m2_expr
 from miasm2.expression.simplifications import expr_simp
 from pdb import pm
-import os
-
-filename = os.environ.get('PYTHONSTARTUP')
-if filename and os.path.isfile(filename):
-    execfile(filename)
 
 print """
 Expression simplification demo: Adding a simplification:
@@ -30,7 +25,7 @@ def simp_add_mul(expr_simp, expr):
 
         # Effective simplification
         return m2_expr.ExprOp("*", expr.args[0],
-                              m2_expr.ExprInt_from(expr.args[0], 3))
+                              m2_expr.ExprInt(3, expr.args[0].size))
     else:
         # Do not simplify
         return expr
@@ -48,4 +43,4 @@ print "\t%s = %s" % (base_expr, expr_simp(base_expr))
 
 # Automatic fail
 assert(expr_simp(base_expr) == m2_expr.ExprOp("*", a,
-                                              m2_expr.ExprInt_from(a, 3)))
+                                              m2_expr.ExprInt(3, a.size)))

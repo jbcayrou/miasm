@@ -1,7 +1,7 @@
 import logging
 import operator
 
-from miasm2.core.asmbloc import asm_label
+from miasm2.core.asmblock import AsmLabel
 from miasm2.ir.translators.translator import Translator
 from miasm2.expression.smt2_helper import *
 
@@ -134,7 +134,7 @@ class TranslatorSMT2(Translator):
         return bit_vec_val(expr.arg.arg, expr.size)
 
     def from_ExprId(self, expr):
-        if isinstance(expr.name, asm_label):
+        if isinstance(expr.name, AsmLabel):
             if expr.name.offset is not None:
                 return bit_vec_val(str(expr.name.offset), expr.size)
             else:
@@ -163,10 +163,8 @@ class TranslatorSMT2(Translator):
 
     def from_ExprCompose(self, expr):
         res = None
-        args = sorted(expr.args, key=operator.itemgetter(2))  # sort by start off
-        for subexpr, start, stop in args:
-            sube = self.from_expr(subexpr)
-            e = bv_extract(stop-start-1, 0, sube)
+        for arg in expr.args:
+            e = bv_extract(arg.size-1, 0, self.from_expr(arg))
             if res:
                 res = bv_concat(e, res)
             else:
