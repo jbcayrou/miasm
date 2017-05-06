@@ -37,6 +37,34 @@ class EvmCallDataSem:
 
         return e
 
+    def set(self, data, offset=0):
+        """
+        To set calldata to a specific value.
+        This function can be used for symb pool initialization 
+
+        Example :
+            symb_calldata = calldata_sem.set("HELLO")
+            symb = machine.mn.regs.regs_init
+            symb.update(symb_calldata)
+            sb = symbexec(ira, symb)
+        """
+
+        mem = {}
+        start = 0
+        if offset == 0: # Should not add +0x0 
+            val = ExprInt(ord(data[0]),8)
+            mem[ExprMem(ExprId("CALLDATA",256), 8)]= val
+            start = 1
+        
+        size = len(data)
+
+        for i in xrange(start, size):
+            val = ExprInt(ord(data[i]),8)
+            mem[ExprMem(ExprId("CALLDATA",256)+ExprInt(i+offset,256), 8)] = val
+
+        return mem
+
+
 class EvmMemSem:
     prefix = ExprId("MEM",256)
 
@@ -487,13 +515,8 @@ def op_not(ir, instr):
     """
     e = []
 
-    cond = ExprCond( _stack_item(0),
-                     ExprInt(0,256), # if 1
-                     ExprInt(1,256)  # if 0
-                    )
+    e.append(ExprAff(_stack_item(0), ~ _stack_item(0)))
 
-
-    e.append(ExprAff(_stack_item(0),cond))
 
     return e, []
 
@@ -672,27 +695,24 @@ def op_calldatacopy(ir, instr):
     """
     Copy input data in current environment to memory
     """
-    e = []
-
-    arg0 = _stack_item(0)
-    arg1 = _stack_item(1)
-    arg2 = _stack_item(2)
-
-
     warnings.warn('EVM WARNING: CALLDATACOPY not implemented')
+    e = []
     """
-    e.append(ExprOp("evm_calldatacopy",
-             arg0,
-             ExprMem(ExprInt256(MEM_BASE_CALLDATA * SIZE_WORD)+arg1 * ExprInt256(SIZE_WORD), SIZE_WORD),
-             arg2)
-            )
-    """
-    e.append(ExprAff(_stack_item(0), ExprInt(0, 256)))
-    e.append(ExprAff(_stack_item(1), ExprInt(0, 256)))
-    e.append(ExprAff(_stack_item(2), ExprInt(0, 256)))
+
+
+    mem_addr = _stack_item(0)
+    call_off = _stack_item(1)
+    size = _stack_item(2)
+
+    for i in xrange(0, size.arg):
+        i_expr = ExprInt(i, 256)
+
+        tmp_e = ExprAff(ExprMem(mem_sem.prefix + i_expr, 8), ExprMem(calldata_sem.prefix + call_off + i_expr))
+        e.append(tmp_e)
 
     e.append(ExprAff(SP, SP - ExprInt256(3*SIZE_WORD)))
 
+    """
     return e, []
 
 def op_call(ir, instr):

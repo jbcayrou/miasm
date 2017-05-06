@@ -8,7 +8,7 @@ import binascii
 from miasm2.ir.symbexec import SymbolicExecutionEngine
 from miasm2.arch.evm.arch import mn_evm as mn
 from miasm2.arch.evm.sem import ir_evm as ir_arch
-from miasm2.arch.evm.sem import MEM_BASE_CALLDATA
+from miasm2.arch.evm.sem import MEM_BASE_CALLDATA, calldata_sem, mem_sem, storage_sem
 from miasm2.arch.evm.regs import *
 from miasm2.arch.evm.disasm import dis_evm
 
@@ -35,8 +35,15 @@ expr_simp.enable_passes(ExpressionSimplifier.PASS_COND)
 # Add EVM_PASS to resolve evm_xxx operators
 expr_simp.enable_passes(ExpressionSimplifier.EVM_PASS)
 
-def M(pos):
+def mem_stack(pos):
     return ExprMem(ExprInt256(pos*256), 256)
+
+def mem_memory(pos):
+    return ExprMem(mem_sem.prefix + ExprInt(pos, 256), 8)
+
+
+def mem_storage(pos):
+    return ExprMem(storage_sem.prefix + ExprInt(pos, 256), 256)
 
 def M_sp(pos):
     offset = ExprInt256((pos+1)*256)
@@ -81,7 +88,7 @@ def compute_text(asm, inputstate={}, debug=False, exclude = []):
     all_bloc, symbol_pool = parse_asm.parse_txt(mn,0, asm)
 
     sympool = dict(regs_init)
-    sympool.update({k: ExprInt(v, k.size) for k, v in inputstate.iteritems()})
+    sympool.update({k: v if isinstance(v, ExprInt) else  ExprInt(v, k.size) for k, v in inputstate.iteritems()})
 
     interm = ir_arch()
 
@@ -91,7 +98,7 @@ def compute_text(asm, inputstate={}, debug=False, exclude = []):
 
     symexec = SymbolicExecutionEngine(interm, sympool)
 
-    symbolic_pc = symexec.emul_ir_blocks(0, step=True)
+    symbolic_pc = symexec.emul_ir_blocks(0, step=False)
 
     if debug:
         for k, v in symexec.symbols.items():
@@ -108,7 +115,7 @@ def compute_text(asm, inputstate={}, debug=False, exclude = []):
             out[k] = v.arg.arg
         else:
             out[k] = v
-    return out, symexec.symbols
+    return out, symexec
 
 
 def compute_text_bytecode(asm, inputstate={}, debug=False):
@@ -137,7 +144,7 @@ def compute_text_bytecode(asm, inputstate={}, debug=False):
 
     symexec = SymbolicExecutionEngine(interm, sympool)
 
-    symbolic_pc = symexec.emul_ir_blocks(0, step=True)
+    symbolic_pc = symexec.emul_ir_blocks(0, step=False)
 
     if debug:
         for k, v in symexec.symbols.items():
@@ -153,7 +160,7 @@ def compute_text_bytecode(asm, inputstate={}, debug=False):
             out[k] = v.arg.arg
         else:
             out[k] = v
-    return out
+    return out, symexec.symbols
 
 
 class TestEVMSemantic(unittest.TestCase):
@@ -166,8 +173,8 @@ class TestEVMSemantic(unittest.TestCase):
         op = "PUSH%d 0x%x" % (size, number)
 
         self.assertEqual(
-            compute(op, {SP: 0}),
-            { M(0): number, SP : 1*256}
+            compute(op),
+            { mem_stack(0): number, SP : 1*256}
             )
 
     def test_push(self):
@@ -178,10 +185,10 @@ class TestEVMSemantic(unittest.TestCase):
         asm_text = """
 PUSH1 0x10
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                           M(0): 0x10,
+                           mem_stack(0): 0x10,
                            SP: 1*256
                          }
                         )
@@ -190,10 +197,10 @@ PUSH1 0x10
 PUSH1 0x10
 PUSH1 0x01
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
-                         { M(1): 0x01,
-                           M(0): 0x10,
+                         { mem_stack(1): 0x01,
+                           mem_stack(0): 0x10,
                            SP: 2*256
                          }
                         )
@@ -204,13 +211,13 @@ PUSH1 0x01
 PUSH4 0x11223344
 PUSH12 0x112233445566778899aabbcc
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          { 
-                           M(3): 0x112233445566778899aabbcc, 
-                           M(2): 0x11223344, 
-                           M(1): 0x01, 
-                           M(0): 0x10,
+                           mem_stack(3): 0x112233445566778899aabbcc, 
+                           mem_stack(2): 0x11223344, 
+                           mem_stack(1): 0x01, 
+                           mem_stack(0): 0x10,
                            SP: 4*256
                          }
                         )
@@ -222,11 +229,11 @@ PUSH1 0x10
 PUSH1 0x01
 SWAP1
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0x01,
-                            M(1): 0x10,
+                            mem_stack(0): 0x01,
+                            mem_stack(1): 0x10,
                             SP: SP_pos(2),
                           }
                         )
@@ -238,13 +245,13 @@ PUSH2 0x2222
 PUSH2 0x3210
 SWAP3
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(3): 0x0123,
-                            M(2): 0x2222,
-                            M(1): 0x1111,
-                            M(0): 0x3210,
+                            mem_stack(3): 0x0123,
+                            mem_stack(2): 0x2222,
+                            mem_stack(1): 0x1111,
+                            mem_stack(0): 0x3210,
                             SP: SP_pos(4),
                           }
                         )
@@ -257,11 +264,11 @@ PUSH1 0x10
 PUSH1 0x01
 ADD
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0x11,
-                            M(1): 0x0,
+                            mem_stack(0): 0x11,
+                            mem_stack(1): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -273,11 +280,11 @@ PUSH1 0x03
 PUSH1 0x04
 MUL
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0x0c, # 3*4 = 12
-                            M(1): 0x0,
+                            mem_stack(0): 0x0c, # 3*4 = 12
+                            mem_stack(1): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -289,11 +296,11 @@ PUSH1 0x01
 PUSH1 0x08
 SUB
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0x07, # 3*4 = 12
-                            M(1): 0x0,
+                            mem_stack(0): 0x07, # 3*4 = 12
+                            mem_stack(1): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -305,11 +312,11 @@ PUSH1 0x03
 PUSH1 0x09
 DIV
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0x3, # 9/3 = 3
-                            M(1): 0x0,
+                            mem_stack(0): 0x3, # 9/3 = 3
+                            mem_stack(1): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -321,11 +328,11 @@ PUSH1 0x00
 PUSH1 0x09
 DIV
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0x0,
-                            M(1): 0x0,
+                            mem_stack(0): 0x0,
+                            mem_stack(1): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -337,11 +344,11 @@ PUSH1 0x10
 PUSH1 0x18
 MOD
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0x8, # 0x18 % 0x10 = 0x08
-                            M(1): 0x0,
+                            mem_stack(0): 0x8, # 0x18 % 0x10 = 0x08
+                            mem_stack(1): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -353,11 +360,11 @@ PUSH1 0x8
 PUSH1 0x2
 EXP
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 256, # 2**8 = 256
-                            M(1): 0x0,
+                            mem_stack(0): 256, # 2**8 = 256
+                            mem_stack(1): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -370,12 +377,12 @@ PUSH1 0x8
 PUSH1 0x10
 ADDMOD
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0x8, # (0x10 + 0x8) % 0x10
-                            M(1): 0x0,
-                            M(2): 0x0,
+                            mem_stack(0): 0x8, # (0x10 + 0x8) % 0x10
+                            mem_stack(1): 0x0,
+                            mem_stack(2): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -389,12 +396,12 @@ PUSH1 0x8
 PUSH1 0x10
 MULMOD
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0x0, # (0x10 * 0x8) % 0x10
-                            M(1): 0x0,
-                            M(2): 0x0,
+                            mem_stack(0): 0x0, # (0x10 * 0x8) % 0x10
+                            mem_stack(1): 0x0,
+                            mem_stack(2): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -406,11 +413,11 @@ PUSH1 0x8
 PUSH1 0x2
 LT
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 1, # 2**8 = 256
-                            M(1): 0x0,
+                            mem_stack(0): 1, # 2**8 = 256
+                            mem_stack(1): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -420,11 +427,11 @@ PUSH1 0x8
 PUSH1 0x2
 LT
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 1, # 2**8 = 256
-                            M(1): 0x0,
+                            mem_stack(0): 1, # 2**8 = 256
+                            mem_stack(1): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -436,11 +443,11 @@ PUSH1 0x8
 PUSH1 0x2
 GT
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0, # 2**8 = 256
-                            M(1): 0x0,
+                            mem_stack(0): 0, # 2**8 = 256
+                            mem_stack(1): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -455,11 +462,11 @@ ADD
 PUSH1 0x0
 SLT
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0, #  ? 0x00 <s 0xffffff...f0 (-15) => no
-                            M(1): 0,
+                            mem_stack(0): 0, #  ? 0x00 <s 0xffffff...f0 (-15) => no
+                            mem_stack(1): 0,
                             SP: SP_pos(1)
                           }
                         )
@@ -471,11 +478,11 @@ ADD
 PUSH1 0x3
 SLT
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0, #  ? 0x00 <s 0xffffff...f0 (-15) => no
-                            M(1): 0,
+                            mem_stack(0): 0, #  ? 0x00 <s 0xffffff...f0 (-15) => no
+                            mem_stack(1): 0,
                             SP: SP_pos(1)
                           }
                         )
@@ -492,12 +499,12 @@ PUSH1 0x01
 ADD
 SLT
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 1, # -3 < -2 ?
-                            M(1): 0x0,
-                            M(2): 0x0,
+                            mem_stack(0): 1, # -3 < -2 ?
+                            mem_stack(1): 0x0,
+                            mem_stack(2): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -512,11 +519,11 @@ ADD
 PUSH1 0x0
 SGT
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 1, #  ? 0x00 <s 0xffffff...f0 (-15) => no
-                            M(1): 0,
+                            mem_stack(0): 1, #  ? 0x00 <s 0xffffff...f0 (-15) => no
+                            mem_stack(1): 0,
                             SP: SP_pos(1)
                           }
                         )
@@ -528,11 +535,11 @@ ADD
 PUSH1 0x3
 SGT
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 1, #  ? 0x00 <s 0xffffff...f0 (-15) => no
-                            M(1): 0,
+                            mem_stack(0): 1, #  ? 0x00 <s 0xffffff...f0 (-15) => no
+                            mem_stack(1): 0,
                             SP: SP_pos(1)
                           }
                         )
@@ -549,12 +556,12 @@ PUSH1 0x01
 ADD
 SGT
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0, # -3 < -2 ?
-                            M(1): 0x0,
-                            M(2): 0x0,
+                            mem_stack(0): 0, # -3 < -2 ?
+                            mem_stack(1): 0x0,
+                            mem_stack(2): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -566,11 +573,11 @@ PUSH1 0x1234
 PUSH1 0x1234
 EQ
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 1,
-                            M(1): 0,
+                            mem_stack(0): 1,
+                            mem_stack(1): 0,
                             SP: SP_pos(1)
                           }
                         )
@@ -580,11 +587,11 @@ PUSH1 0x1234
 PUSH1 0x4444
 EQ
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0,
-                            M(1): 0,
+                            mem_stack(0): 0,
+                            mem_stack(1): 0,
                             SP: SP_pos(1)
                           }
                         )
@@ -596,10 +603,10 @@ EQ
 PUSH1 0x00
 ISZERO
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 1,
+                            mem_stack(0): 1,
                             SP: SP_pos(1)
                           }
                         )
@@ -608,10 +615,10 @@ ISZERO
 PUSH1 0x01
 ISZERO
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0,
+                            mem_stack(0): 0,
                             SP: SP_pos(1)
                           }
                         )
@@ -623,11 +630,11 @@ PUSH1 0xF3
 PUSH1 0x0F
 AND
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0x03,
-                            M(1): 0x0,
+                            mem_stack(0): 0x03,
+                            mem_stack(1): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -639,11 +646,11 @@ PUSH1 0xF3
 PUSH1 0x0F
 OR
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0xff,
-                            M(1): 0x0,
+                            mem_stack(0): 0xff,
+                            mem_stack(1): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -655,11 +662,11 @@ PUSH1 0xF0
 PUSH1 0xFF
 XOR
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0x0F,
-                            M(1): 0x0,
+                            mem_stack(0): 0x0F,
+                            mem_stack(1): 0x0,
                             SP: SP_pos(1)
                           }
                         )
@@ -670,11 +677,11 @@ XOR
 PUSH1 0x%x
 NOT
 """% (2**256-1)
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         print res
         self.assertEqual(res,
                          {
-                            M(0): 0,
+                            mem_stack(0): 0,
                             SP: SP_pos(1)
                           }
                         )
@@ -686,11 +693,11 @@ PUSH1 0x1234
 PUSH1 0x1
 BYTE
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         print res
         self.assertEqual(res,
                          {
-                            M(0): 0x12, # TODO : check Little or big endian ??
+                            mem_stack(0): 0x12, # TODO : check Little or big endian ??
                             SP: SP_pos(1)
                           }
                         )
@@ -704,12 +711,11 @@ PUSH1 0x42
 PUSH1 0xff
 JUMPDEST
 """
-        res,_ = compute_text_bytecode(asm_text, {SP: 0})
+        res,_ = compute_text_bytecode(asm_text)
 
         self.assertEqual(res,
                          {
-                            M(0): 0x0,
-                            SP: SP_pos(0)
+                            mem_stack(0): 0x0,
                           }
                         )
 
@@ -723,12 +729,12 @@ PUSH1 0x01
 PUSH1 0x02
 PUSH1 0x03
 """
-        res,_ = compute_text_bytecode(asm_text, {SP: 0})
+        res,_ = compute_text_bytecode(asm_text)
 
         self.assertEqual(res,
                          {
-                            M(1): 0x03,
-                            M(0): 0x02,
+                            mem_stack(1): 0x03,
+                            mem_stack(0): 0x02,
                             SP: SP_pos(2),
                           }
                         )
@@ -743,11 +749,11 @@ JUMPI
 PUSH1 0xff
 JUMPDEST
 """
-        res,_ = compute_text_bytecode(asm_text, {SP: 0})
+        res,_ = compute_text_bytecode(asm_text)
         self.assertEqual(res,
                          {
-                            M(1): 0x00,
-                            M(0): 0x00,
+                            mem_stack(1): 0x00,
+                            mem_stack(0): 0x00,
                             SP: SP_pos(0)
                           }
                         )
@@ -760,10 +766,10 @@ JUMPI
 PUSH1 0x42
 JUMPDEST
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         self.assertEqual(res,
                          {
-                            M(0): 0x42,
+                            mem_stack(0): 0x42,
                             SP: SP_pos(1)
                           }
                         )
@@ -778,12 +784,12 @@ JUMPI
 PUSH1 0x01
 PUSH1 0x02
 """
-        res,_ = compute_text_bytecode(asm_text, {SP:0})
+        res,_ = compute_text_bytecode(asm_text)
         print res
         return
         self.assertEqual(res,
                          {
-                            M(0): 0x42,
+                            mem_stack(0): 0x42,
                             SP: SP_pos(1)
                           }
                         )
@@ -793,11 +799,11 @@ PUSH1 0x02
 PUSH1 0x07
 POP
 """
-        res,_ = compute_text(asm_text, {SP: 0})
+        res, sb = compute_text(asm_text)
+
         self.assertEqual(res,
                          {
-                            M(0): 0x00,
-                            SP: SP_pos(0)
+                            mem_stack(0): 0x00,
                           }
                         )
 
@@ -814,7 +820,7 @@ ADDRESS
 
         self.assertEqual(res,
                          {
-                            M(0): 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
+                            mem_stack(0): 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
                             R_ADDRESS: 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
                             SP: SP_pos(1)
                           }
@@ -827,11 +833,11 @@ BALANCE
 """
         # Random ethereum account https://etherscan.io/address/0x4f35f119145b8d599d2b70b37c73086f71cd416b
 
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
 
         self.assertEqual(res,
                          {
-                            M(0): int(1.50390625e+21),
+                            mem_stack(0): int(1.50390625e+21),
                             SP: SP_pos(1)
                           }
                         )
@@ -844,7 +850,7 @@ ORIGIN
 
         self.assertEqual(res,
                          {
-                            M(0): 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
+                            mem_stack(0): 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
                             R_ORIGIN: 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
                             SP: SP_pos(1)
                           }
@@ -858,7 +864,7 @@ CALLER
 
         self.assertEqual(res,
                          {
-                            M(0): 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
+                            mem_stack(0): 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
                             R_CALLER: 0x4f35f119145b8d599d2b70b37c73086f71cd416b,
                             SP: SP_pos(1)
                           }
@@ -872,7 +878,7 @@ CALLVALUE
 
         self.assertEqual(res,
                          {
-                            M(0): 0x1337,
+                            mem_stack(0): 0x1337,
                             R_CALLVALUE: 0x1337,
                             SP: SP_pos(1)
                           }
@@ -888,35 +894,29 @@ CALLDATALOAD
 """
 
         # User data input is at MEM_BASE_CALLDATA address
-        call_1 = ExprMem(ExprId("CALLDATA")+ExprInt(0,32))
-        call_2 = ExprMem(ExprId("CALLDATA")+ExprInt(1,32))
-        res,_ = compute_text(asm_text, {  SP: 0, 
-                                        call_1: 0x00,
-                                        call_2: 0x00,
-                                    },[call_1,call_2])
-        self.assertEqual(res,
-                         {
-                            M(0): 0x0,
-                            SP: SP_pos(1)
-                          }
-                        )
+        symb_call = calldata_sem.set("\x01"+"\x00"*31)
+        res, sb = compute_text(asm_text, symb_call)
 
-        return
+
+
+        symbols = sb.symbols
+        self.assertEqual(symbols[mem_stack(0)], ExprInt(0x01,256))
+        self.assertEqual(symbols[SP], ExprInt(SP_pos(1), 256))
+
+
         asm_text = """
 PUSH1 0x01
 CALLDATALOAD
 """
+        symb_call = calldata_sem.set("\x01"+"\x02"+ "\x00"*31)
         # User data input is at MEM_BASE_CALLDATA address
-        res,_ = compute_text(asm_text, { SP: 0,
-                                       M(MEM_BASE_CALLDATA+1): 0x1336
-                                      })
-        self.assertEqual(res,
-                         {
-                            M(0): 0x1336,
-                            M(MEM_BASE_CALLDATA+1): 0x1336,
-                            SP: SP_pos(1)
-                          }
-                        )
+        res, sb = compute_text(asm_text, symb_call)
+
+
+        symbols = sb.symbols
+        self.assertEqual(symbols[mem_stack(0)], ExprInt(0x02, 256))
+        self.assertEqual(symbols[SP], ExprInt(SP_pos(1), 256))
+
 
     def test_calldatasize(self):
         asm_text = """
@@ -927,7 +927,7 @@ CALLDATASIZE
 
         self.assertEqual(res,
                          {
-                            M(0): 0x12,
+                            mem_stack(0): 0x12,
                             R_CALLDATASIZE: 0x12,
                             SP: SP_pos(1)
                           }
@@ -945,17 +945,15 @@ PUSH1 0x1
 PUSH1 0x0
 CALLDATACOPY
 """
-        res,_ = compute_text(asm_text, { SP: 0,
-                                      })
-        self.assertEqual(res,
-                         {
-                            SP: SP_pos(0),
-                            M(0): 0,
-                            M(1): 0,
-                            M(2): 0,
+        symb_call = calldata_sem.set("\x01"+"\x02"+ "\x00"*31)
+        res, sb = compute_text(asm_text, symb_call)
 
-                          }
-                        )
+        symbols = sb.symbols
+        print sb.dump_mem()
+        
+        self.assertEqual(symbols[mem_memory(0)], ExprInt(0x01,8))
+        self.assertEqual(symbols[SP], ExprInt(SP_pos(1), 256))
+
 
     def test_extcodesize(self):
         asm_text = """
@@ -964,12 +962,12 @@ EXTCODESIZE
 """
 #https://etherscan.io/address/0x7011f3edc7fa43c81440f9f43a6458174113b162
 
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         print res
 
         self.assertEqual(res,
                          {
-                            M(0): 3238,
+                            mem_stack(0): 3238,
                             SP: SP_pos(1)
                           }
                         )
@@ -983,12 +981,12 @@ EXTCODECOPY
 """
 #https://etherscan.io/address/0x7011f3edc7fa43c81440f9f43a6458174113b162
 
-        res,_ = compute_text(asm_text, {SP: 0})
+        res,_ = compute_text(asm_text)
         print res
 
         self.assertEqual(res,
                          {
-                            M(0): 3238,
+                            mem_stack(0): 3238,
                             SP: SP_pos(1)
                           }
                         )
@@ -1002,8 +1000,9 @@ MSTORE8
 """
 
 
-        res,sb = compute_text(asm_text, {SP: 0})
-        self.assertEqual(sb[ExprMem(ExprId("MEM",256)+ExprInt(1,256),8)], ExprInt(0x10,8))
+        res,sb = compute_text(asm_text)
+        symbols = sb.symbols
+        self.assertEqual(symbols[ExprMem(ExprId("MEM",256)+ExprInt(1,256),8)], ExprInt(0x10,8))
 
         asm_text = """
 PUSH1 0x11
@@ -1012,8 +1011,9 @@ MSTORE8
 """
 
 
-        res,sb = compute_text(asm_text, {SP: 0})
-        self.assertEqual(sb[ExprMem(ExprId("MEM",256),8)], ExprInt(0x11,8))
+        res,sb = compute_text(asm_text)
+        symbols = sb.symbols
+        self.assertEqual(symbols[ExprMem(ExprId("MEM",256),8)], ExprInt(0x11,8))
 
         asm_text = """
 PUSH32 0x0011223344556677
@@ -1022,15 +1022,16 @@ MSTORE
 """
 
 
-        res,sb = compute_text(asm_text, {SP: 0})
-        self.assertEqual(sb[ExprMem(ExprId("MEM",256),8)], ExprInt(0x77,8))
-        self.assertEqual(sb[ExprMem(ExprId("MEM",256)+ExprInt(1,256),8)], ExprInt(0x66,8))
-        self.assertEqual(sb[ExprMem(ExprId("MEM",256)+ExprInt(2,256),8)], ExprInt(0x55,8))
-        self.assertEqual(sb[ExprMem(ExprId("MEM",256)+ExprInt(3,256),8)], ExprInt(0x44,8))
-        self.assertEqual(sb[ExprMem(ExprId("MEM",256)+ExprInt(4,256),8)], ExprInt(0x33,8))
-        self.assertEqual(sb[ExprMem(ExprId("MEM",256)+ExprInt(5,256),8)], ExprInt(0x22,8))
-        self.assertEqual(sb[ExprMem(ExprId("MEM",256)+ExprInt(6,256),8)], ExprInt(0x11,8))
-        self.assertEqual(sb[ExprMem(ExprId("MEM",256)+ExprInt(7,256),8)], ExprInt(0x00,8))
+        res,sb = compute_text(asm_text)
+        symbols = sb.symbols
+        self.assertEqual(symbols[ExprMem(ExprId("MEM",256),8)], ExprInt(0x77,8))
+        self.assertEqual(symbols[ExprMem(ExprId("MEM",256)+ExprInt(1,256),8)], ExprInt(0x66,8))
+        self.assertEqual(symbols[ExprMem(ExprId("MEM",256)+ExprInt(2,256),8)], ExprInt(0x55,8))
+        self.assertEqual(symbols[ExprMem(ExprId("MEM",256)+ExprInt(3,256),8)], ExprInt(0x44,8))
+        self.assertEqual(symbols[ExprMem(ExprId("MEM",256)+ExprInt(4,256),8)], ExprInt(0x33,8))
+        self.assertEqual(symbols[ExprMem(ExprId("MEM",256)+ExprInt(5,256),8)], ExprInt(0x22,8))
+        self.assertEqual(symbols[ExprMem(ExprId("MEM",256)+ExprInt(6,256),8)], ExprInt(0x11,8))
+        self.assertEqual(symbols[ExprMem(ExprId("MEM",256)+ExprInt(7,256),8)], ExprInt(0x00,8))
 
         asm_text = """
 PUSH2 0xBABE
@@ -1042,9 +1043,11 @@ MSTORE
 """
 
 
-        res,sb = compute_text(asm_text, {SP: 0})
-        self.assertEqual(sb[ExprMem(ExprId("MEM",256),8)], ExprInt(0xBE,8))
-        self.assertEqual(sb[ExprMem(ExprId("MEM",256)+ExprInt(1,256),8)], ExprInt(0xCA,8))
+        res,sb = compute_text(asm_text)
+        symbols = sb.symbols
+
+        self.assertEqual(symbols[ExprMem(ExprId("MEM",256),8)], ExprInt(0xBE,8))
+        self.assertEqual(symbols[ExprMem(ExprId("MEM",256)+ExprInt(1,256),8)], ExprInt(0xCA,8))
 
 
 if __name__ == '__main__':
