@@ -1317,11 +1317,15 @@ def ExprInt64(i):
 
 
 def ExprInt128(i):
-    return ExprInt(uint128(i))
+    warnings.warn('DEPRECATION WARNING: use ExprInt(i, 128) instead of '\
+                  'ExprInt128(i))')
+    return ExprInt(i, 128)
 
 
 def ExprInt256(i):
-    return ExprInt(uint256(i))
+    warnings.warn('DEPRECATION WARNING: use ExprInt(i, 256) instead of '\
+                  'ExprInt256(i))')
+    return ExprInt(i, 256)
 
 
 def ExprInt_from(expr, i):

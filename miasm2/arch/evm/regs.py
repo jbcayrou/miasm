@@ -44,4 +44,10 @@ R_CALLDATALOAD = ""
 gen_regs(regs256_str, globals(), 256)
 
 
-regs_init = { }
+regs_init = {PC : ExprInt(0,256), SP:ExprInt(0,256)}
+
+
+# EVM has memory initialized to zero
+for i in xrange(0,32):
+	regs_init[ExprMem(ExprId("MEM",256)+ExprInt(i,256),8)] = ExprInt(0,8)
+regs_init[ExprMem(ExprId("MEM",256),8)] = ExprInt(0,8) # MEM+0x0 does not work correctly,need to set MEM

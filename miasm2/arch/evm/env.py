@@ -44,6 +44,8 @@ def evm_expr_simplification(self, e):
 
     elif e.op == "evm_extcodecopy":
         pass
+    elif e.op == "evm_calldatacopy":
+        pass
     elif e.op == "evm_blockhash":
         pass
     elif e.op == "evm_timestamp":

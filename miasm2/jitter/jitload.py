@@ -188,6 +188,8 @@ class jitter:
                 from miasm2.jitter.arch import JitCore_msp430 as jcore
             elif arch_name == "mips32":
                 from miasm2.jitter.arch import JitCore_mips32 as jcore
+            elif arch_name == "evm":
+                from miasm2.jitter.arch import JitCore_evm as jcore
             else:
                 raise ValueError("unknown jit arch: %s" % arch_name)
         except ImportError:

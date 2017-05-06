@@ -1300,6 +1300,10 @@ class cls_mn(object):
 
         instr = cls.instruction(c.name, mode, c_args,
                                 additional_info=c.additional_info())
+
+        instr.l = c.mn_len / 8 # Simple fix for https://github.com/cea-sec/miasm/issues/548
+        # TODO : fix instr.offset
+        
         return instr
 
     def dup_info(self, infos):

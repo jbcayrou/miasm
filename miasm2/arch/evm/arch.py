@@ -14,8 +14,7 @@ from miasm2.expression.expression import *
 from collections import defaultdict
 import miasm2.arch.evm.regs as regs_module
 from miasm2.arch.evm.regs import *
-from miasm2.core.asmbloc import asm_label
-
+from miasm2.core.asmblock import asm_label
 
 log = logging.getLogger("evmdis")
 console_handler = logging.StreamHandler()
@@ -33,7 +32,7 @@ def ast_id2expr(a):
 def ast_int2expr(a):
     return m2_expr.ExprInt256(a)
 
-my_var_parser = parse_ast(ast_id2expr, ast_int2expr)
+my_var_parser = ParseAst(ast_id2expr, ast_int2expr)
 base_expr.setParseAction(my_var_parser)
 
 
@@ -41,9 +40,10 @@ class instruction_evm(instruction):
     """
     Ethereum EVM instruction
     """
+
     delayslot = 0
-    offset = 0 # By default the offset to zero
-    l = 15 # By default need a size
+    offset = 0
+    l = 1
 
     def __init__(self, *args, **kargs):
         super(instruction_evm, self).__init__(*args, **kargs)

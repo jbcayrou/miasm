@@ -1,5 +1,5 @@
 from miasm2.jitter.jitload import jitter
-from miasm2.core import asmbloc
+from miasm2.core import asmblock
 from miasm2.core.utils import *
 
 import logging
@@ -14,7 +14,7 @@ class jitter_evm(jitter):
 
     def __init__(self, *args, **kwargs):
         from miasm2.arch.evm.sem import ir_evm
-        sp = asmbloc.asm_symbol_pool()
+        sp = asmblock.asm_symbol_pool()
         jitter.__init__(self, ir_evm(sp), *args, **kwargs)
         self.vm.set_little_endian()
         self.ir_arch.jit_pc = self.ir_arch.arch.regs.PC

@@ -1,4 +1,4 @@
-from miasm2.core.asmbloc import asm_constraint, disasmEngine
+from miasm2.core.asmblock import asm_constraint, disasmEngine
 from miasm2.arch.evm.arch import mn_evm
 import miasm2.expression.expression as m2_expr
 

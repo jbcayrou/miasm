@@ -10,11 +10,89 @@ from miasm2.expression.simplifications import expr_simp
 from miasm2.expression.simplifications_cond import ExprOp_inf_signed, ExprOp_inf_unsigned, ExprOp_equal
 from miasm2.arch.evm.regs import *
 from miasm2.arch.evm.arch import mn_evm
-from miasm2.ir.ir import ir
+from miasm2.ir.ir import IntermediateRepresentation
 from miasm2.arch.evm.env import *
 
 SIZE_WORD = 256
 MEM_BASE_CALLDATA = 0xffff0000 # Base address where are store the input data.
+
+
+class EvmCallDataSem:
+    prefix = ExprId("CALLDATA",256)
+
+    def copy_to_expr256(self, src_addr, dst_expr):
+        """
+        Read 32 bytes of CALLDATA from src_addr and copy them into dst_expr (256 bits)
+        """
+        e = []
+        total = ExprInt(0,256)
+
+        for i in xrange(0,32):
+            expr_i = ExprInt(i,256)
+            
+            tmp_e = ExprMem(self.prefix + src_addr + expr_i, 8).zeroExtend(256) << (expr_i*ExprInt(8,256))
+            total = total | tmp_e
+
+        e.append(ExprAff(dst_expr, total))
+
+        return e
+
+class EvmMemSem:
+    prefix = ExprId("MEM",256)
+
+    def memory_to_expr256(self, src_addr, dst_expr):
+        """
+        Read 32 bytes of MEM from src_addr and copy them into dst_expr (256 bits)
+        """
+        e = []
+        total = ExprInt(0,256)
+
+        for i in xrange(0,32):
+            expr_i = ExprInt(i,256)
+            
+            tmp_e = ExprMem(self.prefix + (src_addr + expr_i), 8).zeroExtend(256)<< (expr_i*ExprInt(8,256))
+            total = total + tmp_e
+
+        e.append(ExprAff(dst_expr, total))
+
+
+        return e
+
+    def store(self, src_addr, value_expr):
+        e = []
+        for i in xrange(0,32):
+            expr_i = ExprInt(i,256)
+            e.append(ExprAff(ExprMem(self.prefix + (src_addr + expr_i), 8), value_expr[i*8: (i+1)*8]))
+        return e
+
+    def store8(self, src_addr, value_expr):
+        e = []
+        tmp = value_expr % ExprInt(256,256)
+
+        e.append(ExprAff(ExprMem(self.prefix + src_addr, 8), tmp[0:8]))
+        return e
+
+class EvmStorageSem:
+    prefix = ExprId("STORAGE",256)
+
+    def storage_to_expr256(self, src_addr_expr, dst_expr):
+        """
+        Read 32 bytes of MEM from src_addr and copy them into dst_expr (256 bits)
+        """
+        e = []
+        e.append(ExprAff(dst_expr, ExprMem(self.prefix + src_addr_expr, 256)))
+
+        return e
+
+    def store(self, addr_expr, value_expr):
+        e = []
+        e.append(ExprAff(ExprMem(self.prefix + addr_expr, 256),value_expr))
+
+        return e
+
+storage_sem = EvmStorageSem()
+calldata_sem = EvmCallDataSem()
+mem_sem = EvmMemSem()
 
 def _stack_item(pos):
     """
@@ -409,7 +487,13 @@ def op_not(ir, instr):
     """
     e = []
 
-    e.append(ExprAff(_stack_item(0), ~ _stack_item(0)))
+    cond = ExprCond( _stack_item(0),
+                     ExprInt(0,256), # if 1
+                     ExprInt(1,256)  # if 0
+                    )
+
+
+    e.append(ExprAff(_stack_item(0),cond))
 
     return e, []
 
@@ -459,6 +543,7 @@ def op_jump(ir, instr):
     dst_addr = _stack_item(0)
 
     e.append(ExprAff(ir.IRDst, dst_addr))
+    e.append(ExprAff(PC, dst_addr))
     e.append(ExprAff(_stack_item(0), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(1*SIZE_WORD)))
 
@@ -496,6 +581,7 @@ def op_jumpi(ir, instr):
                        )
 
     e.append(ExprAff(ir.IRDst, new_pc))
+    e.append(ExprAff(ir.pc, new_pc))
 
     # Set zero in the two first stack elements
     e.append(ExprAff(_stack_item(0), ExprInt256(0)))
@@ -565,9 +651,9 @@ def op_calldata(ir, instr):
     """
     e = []
 
-    arg = _stack_item(0)
 
-    e.append(ExprAff(_stack_item(0), ExprMem(ExprInt256(MEM_BASE_CALLDATA * SIZE_WORD)+arg * ExprInt256(SIZE_WORD), SIZE_WORD)))
+    e = calldata_sem.copy_to_expr256(_stack_item(0), _stack_item(0))
+    #e.append(ExprAff(_stack_item(0), ExprMem(ExprInt256(MEM_BASE_CALLDATA * SIZE_WORD)+arg * ExprInt256(SIZE_WORD), SIZE_WORD)))
 
     return e, []
 
@@ -579,6 +665,33 @@ def op_calldatasize(ir, instr):
     e = []
 
     _stack_push(ir.calldatasize, e)
+
+    return e, []
+
+def op_calldatacopy(ir, instr):
+    """
+    Copy input data in current environment to memory
+    """
+    e = []
+
+    arg0 = _stack_item(0)
+    arg1 = _stack_item(1)
+    arg2 = _stack_item(2)
+
+
+    warnings.warn('EVM WARNING: CALLDATACOPY not implemented')
+    """
+    e.append(ExprOp("evm_calldatacopy",
+             arg0,
+             ExprMem(ExprInt256(MEM_BASE_CALLDATA * SIZE_WORD)+arg1 * ExprInt256(SIZE_WORD), SIZE_WORD),
+             arg2)
+            )
+    """
+    e.append(ExprAff(_stack_item(0), ExprInt(0, 256)))
+    e.append(ExprAff(_stack_item(1), ExprInt(0, 256)))
+    e.append(ExprAff(_stack_item(2), ExprInt(0, 256)))
+
+    e.append(ExprAff(SP, SP - ExprInt256(3*SIZE_WORD)))
 
     return e, []
 
@@ -646,9 +759,9 @@ def op_mload(ir, instr):
     """
     Load word from memory
     """
-    e = []
 
-    e.append(ExprAff(_stack_item(0), ExprOp("evm_mload", _stack_item(0))))
+    e = []
+    e = mem_sem.memory_to_expr256( _stack_item(0),  _stack_item(0))
 
     return e, []
 
@@ -656,30 +769,20 @@ def op_mstore(ir, instr):
     """
     Save word to memory
     """
-    e = []
-
-    # TODO
-    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
-    e.append(ExprAff(_stack_item(1), ExprInt256(0)))
+    e = mem_sem.store( _stack_item(0),  _stack_item(1))
+    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD),SIZE_WORD), ExprInt256(0)))
+    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD),SIZE_WORD), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(2*SIZE_WORD)))
-
-    #e.append(ExprOp("evm_mstore", _stack_item(0)))
-
     return e, []
 
 def op_mstore8(ir, instr):
     """
     Save byte to memory
     """
-    e = []
-    
-    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
-    e.append(ExprAff(_stack_item(1), ExprInt256(0)))
+    e = mem_sem.store8( _stack_item(0),  _stack_item(1))
+    e.append(ExprAff(ExprMem(SP - ExprInt256(1*SIZE_WORD),SIZE_WORD), ExprInt256(0)))
+    e.append(ExprAff(ExprMem(SP - ExprInt256(2*SIZE_WORD),SIZE_WORD), ExprInt256(0)))
     e.append(ExprAff(SP, SP - ExprInt256(2*SIZE_WORD)))
-
-    # TODO
-    #e.append(ExprOp("evm_mstore8", _stack_item(0), _stack_item(1)))
-
     return e, []
 
 def op_sload(ir, instr):
@@ -687,8 +790,7 @@ def op_sload(ir, instr):
     Load word from storage
     """
     e = []
-
-    e.append(ExprAff(_stack_item(0), ExprOp("evm_sload", _stack_item(0))))
+    e = storage_sem.storage_to_expr256(_stack_item(0),  _stack_item(0))
 
     return e, []
 
@@ -697,10 +799,7 @@ def op_sstore(ir, instr):
     Save word to memory
     """
     e = []
-
-    #TODO
-    e.append(ExprAff(_stack_item(0), ExprInt256(0)))
-    e.append(ExprAff(_stack_item(1), ExprInt256(0)))
+    e = storage_sem.store(_stack_item(0),  _stack_item(1))
     e.append(ExprAff(SP, SP - ExprInt256(2*SIZE_WORD)))
 
     return e, []
@@ -715,6 +814,13 @@ def op_timestamp(ir, instr):
 
     return e, []
 
+def op_gas(ir, instr):
+    """
+    Get the amount of available gas,including the corresponding reduction for the cost of this instruction.
+    """
+    e = []
+    _stack_push(ir.gas, e)
+    return e, []
 #mnemo_func = sbuild.functions
 
 mnemo_func = {
@@ -750,7 +856,7 @@ mnemo_func = {
     "CALLVALUE"    : op_callvalue,
     "CALLDATALOAD" : op_calldata,
     "CALLDATASIZE" : op_calldatasize,
-    "CALLDATACOPY" : undef,
+    "CALLDATACOPY" : op_calldatacopy,
     "CODESIZE"     : undef,
     "CODECOPY"     : undef,
     "GASPRICE"     : undef,
@@ -767,14 +873,14 @@ mnemo_func = {
     "POP"          : op_pop,
     "MLOAD"        : op_mload,
     "MSTORE"       : op_mstore,
-    "MSTORE8"      : undef,
+    "MSTORE8"      : op_mstore8,
     "SLOAD"        : op_sload,
     "SSTORE"       : op_sstore,
     "JUMP"         : op_jump,
     "JUMPI"        : op_jumpi,
     "PC"           : undef,
     "MSIZE"        : undef,
-    "GAS"          : undef,
+    "GAS"          : op_gas,
     "JUMPDEST"     : op_jumpdest,
 
     # PUSH are defined bellow
@@ -812,10 +918,10 @@ def get_mnemo_expr(ir, instr, *args):
     instr, extra_ir = mnemo_func[instr.name.upper()](ir, instr, *args)
     return instr, extra_ir
 
-class ir_evm(ir):
+class ir_evm(IntermediateRepresentation):
 
     def __init__(self, symbol_pool=None):
-        ir.__init__(self, mn_evm, None, symbol_pool)
+        IntermediateRepresentation.__init__(self, mn_evm, None, symbol_pool)
         self.pc = PC
         self.sp = SP
         self.gas = GAS
@@ -831,6 +937,7 @@ class ir_evm(ir):
         self.block_hash = R_BLOCK_HASH
         self.block_timestamp = R_BLOCK_TIMESTAMP
 
+
     def mod_pc(self, instr, instr_ir, extra_ir):
         pass
 
@@ -839,16 +946,16 @@ class ir_evm(ir):
         args = instr.args
         instr_ir, extra_ir = get_mnemo_expr(self, instr, *args)
 
-        # TODO : PC incrementation is not always +1 (when PUSH xxx )
         for i, x in enumerate(instr_ir):
             x = ExprAff(x.dst, x.src.replace_expr(
-                {self.pc: ExprInt256(instr.offset + 1)}))
+                {self.pc: ExprInt256(instr.offset + instr.l)}))
+
             instr_ir[i] = x
         for b in extra_ir:
             for irs in b.irs:
                 for i, x in enumerate(irs):
                     x = ExprAff(x.dst, x.src.replace_expr(
-                        {self.pc: ExprInt256(instr.offset + 1)}))
+                        {self.pc: ExprInt256(instr.offset + instr.l)}))
                     irs[i] = x
 
         return instr_ir, extra_ir
